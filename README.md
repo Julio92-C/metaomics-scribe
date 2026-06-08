@@ -45,6 +45,28 @@ metaomics-scribe/
 
 When implementation starts, `src/metaomics_scribe/` (Python package) and `tests/` will be added.
 
+## Getting started
+
+The repo is pre-implementation: there is nothing to install or run yet. What you *can* do today:
+
+```bash
+git clone https://github.com/Julio92-C/metaomics-scribe.git
+cd metaomics-scribe
+```
+
+- Read [`docs/MANIFEST_SCHEMA.md`](docs/MANIFEST_SCHEMA.md) — the full contract spec, the only thing the agent will read from an upstream pipeline.
+- Inspect [`examples/manifest.example.json`](examples/manifest.example.json) — a real `chicken_batch2` manifest, exercising every stage and `kind` in the vocabulary.
+- Review [`journals/frontiers_microbiome.yaml`](journals/frontiers_microbiome.yaml) — the reference journal template; adding a new journal will be a config edit, not a code change.
+
+Once **v0.1** lands (see Roadmap), the Python package will be installable via [`uv`](https://docs.astral.sh/uv/):
+
+```bash
+uv sync          # create venv and install deps from pyproject.toml
+uv run pytest    # run the test suite
+```
+
+Issues and discussion: <https://github.com/Julio92-C/metaomics-scribe/issues>.
+
 ## Roadmap
 
 1. **v0.1 — contract freeze.** Manifest schema stabilised, one journal template, one example manifest from a real run.

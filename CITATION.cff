@@ -6,7 +6,7 @@ authors:
   - given-names: Julio Cesar
     family-names: Ortega Cambara
     email: juliocesar921016@gmail.com
-repository-code: ""        # fill in once the GitHub repo is created
+repository-code: "https://github.com/Julio92-C/metaomics-scribe"
 license: MIT
 version: "0.0.0"           # bump as releases happen
 date-released: "2026-05-31"
