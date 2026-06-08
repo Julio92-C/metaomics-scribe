@@ -1,0 +1,58 @@
+[project]
+name = "metaomics-scribe"
+version = "0.0.0"
+description = "Research agent that turns metagenomics pipeline outputs into a journal-ready manuscript draft, grounded in a stable manifest.json contract."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Julio Cesar Ortega Cambara", email = "juliocesar921016@gmail.com" },
+]
+requires-python = ">=3.12"
+keywords = [
+    "metagenomics",
+    "manuscript-generation",
+    "research-agent",
+    "reproducibility",
+    "large-language-models",
+]
+classifiers = [
+    "Development Status :: 1 - Planning",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "pydantic>=2.7",
+]
+
+[project.urls]
+Homepage = "https://github.com/Julio92-C/metaomics-scribe"
+Repository = "https://github.com/Julio92-C/metaomics-scribe"
+Issues = "https://github.com/Julio92-C/metaomics-scribe/issues"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.5",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/metaomics_scribe"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "RUF"]
