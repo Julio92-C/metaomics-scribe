@@ -1,5 +1,10 @@
 # metaomics-scribe
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
+[![Status: scaffolding](https://img.shields.io/badge/status-scaffolding-orange.svg)](#metaomics-scribe)
+[![Manifest contract: v1.0](https://img.shields.io/badge/manifest_contract-v1.0-informational.svg)](docs/MANIFEST_SCHEMA.md)
+
 A research agent that turns a completed metagenomics analysis into a journal-ready manuscript draft — figures, tables, and prose grounded in the actual numbers produced upstream.
 
 **Status.** Scaffolding only. This repository contains the contract, the layout, and the journal templates. No agent code yet. The intent is to lock the inputs/outputs first, then build incrementally.
