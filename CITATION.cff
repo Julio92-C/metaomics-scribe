@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+title: "metaomics-scribe"
+message: "If you use this software, please cite it as below."
+type: software
+authors:
+  - given-names: Julio Cesar
+    family-names: Ortega Cambara
+    email: juliocesar921016@gmail.com
+repository-code: ""        # fill in once the GitHub repo is created
+license: MIT
+version: "0.0.0"           # bump as releases happen
+date-released: "2026-05-31"
+abstract: >
+  metaomics-scribe is a research agent that turns the outputs of a
+  metagenomics analysis pipeline into a journal-ready manuscript draft —
+  publication-quality figure panels (main and supplementary) and prose
+  for every IMRaD section, grounded in a stable manifest.json contract.
+keywords:
+  - metagenomics
+  - manuscript-generation
+  - research-agent
+  - reproducibility
+  - large-language-models

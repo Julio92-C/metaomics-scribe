@@ -1,0 +1,121 @@
+# Frontiers in Microbiology — manuscript template
+# Source: https://www.frontiersin.org/journals/microbiology/for-authors/author-guidelines
+# Update this file when the journal revises its guidelines.
+
+journal:
+  id:        frontiers_microbiome
+  name:      "Frontiers in Microbiology"
+  publisher: "Frontiers Media"
+  url:       "https://www.frontiersin.org/journals/microbiology"
+  article_type: "Original Research"
+
+manuscript:
+  citation_style: "frontiers"   # CSL id; agent resolves to a .csl file
+  max_word_count: 12000         # Original Research; excludes abstract, refs, captions
+  max_main_figures: 8
+  max_main_tables: 5
+
+  # Order matters — agent drafts sections in this order, since later sections
+  # can ground their prose on numbers established in earlier ones.
+  sections:
+    - id: title
+    - id: abstract
+      max_words: 350
+      structured: false
+    - id: keywords
+      min: 5
+      max: 8
+    - id: introduction
+      grounded_in: []                          # no manifest grounding required
+    - id: methods
+      grounded_in: [study, config, pipeline]   # cite pipeline version + filters/stats
+      subsections:
+        - id: study_design
+        - id: sample_collection_and_sequencing
+        - id: bioinformatic_pipeline
+        - id: statistical_analysis
+    - id: results
+      grounded_in: [stages]                    # every claim must cite a stage artifact
+      subsections:
+        - id: alpha_diversity
+        - id: beta_diversity
+        - id: taxonomic_composition
+        - id: differential_abundance
+        - id: resistome_virulome_mobilome      # optional, only if those stages ran
+        - id: co_occurrence_network            # optional, only if network ran
+    - id: discussion
+      grounded_in: [stages]
+    - id: conclusion
+      max_words: 200
+    - id: data_availability_statement
+    - id: author_contributions
+    - id: funding
+    - id: acknowledgments
+    - id: conflict_of_interest
+    - id: references
+
+figures:
+  # Frontiers accepts widths matching single column, 1.5 column, or double column.
+  column_widths_mm:
+    single:    85
+    one_half:  120
+    double:    180
+  max_height_mm: 235
+  font_min_pt:   8
+  font_max_pt:   12
+  dpi_min:       300
+  dpi_preferred: 600
+  formats: [tiff, eps, jpeg, pdf, png]
+  preferred_format: tiff
+  caption:
+    position: below           # placed below figure in submission file
+    bold_label: true          # "Figure 1." in bold
+    max_words: 300
+
+tables:
+  format: docx                # editable tables required, not images
+  caption:
+    position: above
+    bold_label: true
+
+supplementary:
+  numbering: "S{n}"           # Figure S1, Table S1, ...
+  separate_file: true
+  max_items: null             # no hard cap
+  formats_accepted: [pdf, docx, xlsx, csv, tsv]
+
+# Mapping from manuscript figure slots to candidate manifest figure kinds.
+# Agent picks the most-fitting kind per slot; absent kinds are skipped and the
+# slot reflows. Multi-panel slots compose several manifest figures into one.
+figure_slots:
+  - id: fig1_overview
+    title: "Study design and sample overview"
+    panels:
+      - kind: composition_stacked_bar
+  - id: fig2_alpha_beta
+    title: "Alpha and beta diversity"
+    panels:
+      - kind: alpha_violin
+        metric: "Shannon diversity index"
+      - kind: alpha_violin
+        metric: "Richness"
+      - kind: pcoa_scatter
+  - id: fig3_daa
+    title: "Differentially abundant taxa"
+    panels:
+      - kind: volcano
+      - kind: top_candidates
+  - id: fig4_network
+    title: "Co-occurrence network"
+    panels:
+      - kind: network_graph
+
+supplementary_slots:
+  - id: figS1_venn_heatmap
+    panels:
+      - kind: venn
+      - kind: taxa_heatmap
+  - id: figS2_all_alpha
+    panels:
+      - kind: alpha_violin
+        repeat_over: metric

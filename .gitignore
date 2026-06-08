@@ -1,0 +1,47 @@
+# Byte-compiled / optimised
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test / coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Generated manuscript artifacts (drafts live in runs/, not committed)
+runs/
+*.docx
+*.pdf
+*.tex
+!docs/**/*.pdf
+!examples/**/*.pdf
+
+# Anthropic / OpenAI cache
+.anthropic/

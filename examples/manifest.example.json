@@ -1,0 +1,302 @@
+{
+  "manifest_version": "1.0",
+  "study": {
+    "id": "chicken_batch2",
+    "name": "Chicken caecum microbiome — Dulse vs Control, weeks 4 and 5",
+    "description": "Second chicken caecum dataset comparing Dulse-supplemented vs Control diets at two timepoints (week 4 and week 5). Exercises a random effect (block) and two negative controls.",
+    "primary_group_col": "Treatment_Bird",
+    "random_effect": "block",
+    "fixed_effects": ["Treatment_Bird", "Weight"],
+    "group_levels": ["Control_W4", "Control_W5", "Dulse_W4", "Dulse_W5"],
+    "n_samples": 32,
+    "n_controls": 2,
+    "control_ids": ["CTRL1", "CTRL2"]
+  },
+  "config": {
+    "filters": {
+      "min_count_per_sample":  17,
+      "min_count_for_species": 500,
+      "min_prevalence_aldex":  2
+    },
+    "stats": {
+      "permanova_permutations": 9999,
+      "aldex_mc_samples":       128,
+      "alpha":                  0.05
+    }
+  },
+  "outputs": {
+    "project_root": "../..",
+    "datasets_dir": "test_run/Datasets",
+    "figures_dir":  "test_run/Figures",
+    "log_file":     "test_run/Reports/pipeline.log"
+  },
+  "stages": {
+    "taxonomy": {
+      "status": "complete",
+      "duration_s": 2.8,
+      "tables": [],
+      "figures": [
+        {
+          "path": "test_run/Figures/taxonomy/taxa_venn.png",
+          "kind": "venn",
+          "groups": ["Control_W4", "Control_W5", "Dulse_W4", "Dulse_W5"],
+          "width_px": 1800,
+          "height_px": 1800,
+          "dpi": 300,
+          "caption_seed": "Venn diagram of taxa shared and unique across the four Treatment x Time groups."
+        },
+        {
+          "path": "test_run/Figures/taxonomy/taxa_heatmap.png",
+          "kind": "taxa_heatmap",
+          "groups": ["Control_W4", "Control_W5", "Dulse_W4", "Dulse_W5"],
+          "width_px": 2400,
+          "height_px": 1600,
+          "dpi": 300,
+          "caption_seed": "Heatmap of the top-50 taxa by mean relative abundance across the four Treatment x Time groups."
+        }
+      ]
+    },
+
+    "relative_abundance": {
+      "status": "complete",
+      "duration_s": 8.4,
+      "tables": [
+        {
+          "path": "test_run/Datasets/relative_abundance/composition_long.csv",
+          "kind": "composition_long",
+          "format": "csv",
+          "schema": {
+            "sample":            "string",
+            "name":              "string",
+            "count":             "double",
+            "relative_abundance": "double",
+            "Treatment_Bird":    "string"
+          },
+          "row_count": 7557,
+          "description": "Long-form per-sample taxon relative abundance, filtered to count > min_count_per_sample."
+        }
+      ],
+      "figures": [
+        {
+          "path": "test_run/Figures/relative_abundance/relative_abundance.png",
+          "kind": "composition_stacked_bar",
+          "groups": ["Control_W4", "Control_W5", "Dulse_W4", "Dulse_W5"],
+          "width_px": 2400,
+          "height_px": 1400,
+          "dpi": 300,
+          "caption_seed": "Stacked-bar composition of the top-25 taxa per sample, faceted by Treatment x Time group."
+        },
+        {
+          "path": "test_run/Figures/relative_abundance/species_count.png",
+          "kind": "species_count",
+          "width_px": 1800,
+          "height_px": 1200,
+          "dpi": 300,
+          "caption_seed": "Distinct species observed per sample, grouped by Treatment x Time."
+        }
+      ]
+    },
+
+    "alpha_diversity": {
+      "status": "complete",
+      "duration_s": 4.1,
+      "tables": [
+        {
+          "path": "test_run/Datasets/alpha_diversity.csv",
+          "kind": "alpha_diversity_per_sample",
+          "format": "csv",
+          "schema": {
+            "sample":                       "string",
+            "berger_parker_index":          "double",
+            "effective_number_of_species":  "double",
+            "fisher_s_alpha":               "double",
+            "inverse_simpson_s_index":      "double",
+            "pielou_s_evenness":            "double",
+            "richness":                     "double",
+            "shannon_diversity_index":      "double",
+            "simpson_s_index":              "double",
+            "Treatment_Bird":               "string"
+          },
+          "row_count": 32,
+          "description": "Per-sample alpha-diversity indices loaded from the wf-metagenomics precomputed CSV (controls dropped)."
+        }
+      ],
+      "figures": [
+        {
+          "path": "test_run/Figures/alpha_diversity/shannon_diversity_index_violin.png",
+          "kind": "alpha_violin",
+          "metric": "Shannon diversity index",
+          "groups": ["Control_W4", "Control_W5", "Dulse_W4", "Dulse_W5"],
+          "width_px": 1800,
+          "height_px": 1200,
+          "dpi": 300,
+          "caption_seed": "Shannon diversity across the four Treatment x Time groups; violin shows the per-sample distribution, inner box the IQR."
+        },
+        {
+          "path": "test_run/Figures/alpha_diversity/richness_violin.png",
+          "kind": "alpha_violin",
+          "metric": "Richness",
+          "groups": ["Control_W4", "Control_W5", "Dulse_W4", "Dulse_W5"],
+          "width_px": 1800,
+          "height_px": 1200,
+          "dpi": 300,
+          "caption_seed": "Observed species richness across the four Treatment x Time groups."
+        }
+      ],
+      "stats_text": [
+        {
+          "path": "test_run/Datasets/alpha_diversity/alpha_stats.txt",
+          "kind": "kruskal_wallis",
+          "primary_var": "Treatment_Bird",
+          "description": "Per-metric Kruskal-Wallis tests across the four Treatment x Time groups."
+        }
+      ]
+    },
+
+    "beta_diversity": {
+      "status": "complete",
+      "duration_s": 6.7,
+      "tables": [
+        {
+          "path": "test_run/Datasets/beta_diversity_pcoa.csv",
+          "kind": "beta_pcoa_scores",
+          "format": "csv",
+          "schema": {
+            "sample":         "string",
+            "PC1":            "double",
+            "PC2":            "double",
+            "PC3":            "double",
+            "Treatment_Bird": "string"
+          },
+          "row_count": 32,
+          "description": "PCoA scores from Bray-Curtis on the relative-abundance table."
+        }
+      ],
+      "figures": [
+        {
+          "path": "test_run/Figures/beta_diversity/pcoa.png",
+          "kind": "pcoa_scatter",
+          "groups": ["Control_W4", "Control_W5", "Dulse_W4", "Dulse_W5"],
+          "width_px": 1800,
+          "height_px": 1400,
+          "dpi": 300,
+          "caption_seed": "PCoA of Bray-Curtis distances coloured by Treatment x Time group; ellipses are 95% confidence."
+        }
+      ],
+      "stats_text": [
+        {
+          "path": "test_run/Figures/beta_diversity/permanova.txt",
+          "kind": "permanova",
+          "primary_var": "Treatment_Bird",
+          "description": "Adonis PERMANOVA on Bray-Curtis distances with 9999 permutations."
+        },
+        {
+          "path": "test_run/Figures/beta_diversity/permdisp.txt",
+          "kind": "permdisp",
+          "primary_var": "Treatment_Bird",
+          "description": "PERMDISP homogeneity-of-dispersion test."
+        }
+      ]
+    },
+
+    "differential_abundance": {
+      "status": "complete",
+      "duration_s": 38.2,
+      "tables": [
+        {
+          "path": "test_run/Datasets/aldex2/taxa/merged_pairwise_with_overall.tsv",
+          "kind": "daa_pairwise",
+          "format": "tsv",
+          "schema": {
+            "feature":     "string",
+            "pair":        "string",
+            "effect":      "double",
+            "we_eBH":      "double",
+            "kw_eBH":      "double",
+            "overall_eBH": "double"
+          },
+          "row_count": 1042,
+          "description": "ALDEx2 pairwise results merged with the overall Kruskal-Wallis BH-adjusted p-value."
+        },
+        {
+          "path": "test_run/Datasets/aldex2/taxa/top_candidates_summary.csv",
+          "kind": "daa_top_candidates",
+          "format": "csv",
+          "schema": {
+            "feature":     "string",
+            "n_pairs_sig": "integer",
+            "min_eBH":     "double",
+            "max_abs_eff": "double"
+          },
+          "row_count": 28,
+          "description": "Top DAA candidates ranked by number of significant pairwise contrasts."
+        }
+      ],
+      "figures": [
+        {
+          "path": "test_run/Figures/differential_abundance/taxa/volcano_Control_W4_vs_Dulse_W4.png",
+          "kind": "volcano",
+          "pair": ["Control_W4", "Dulse_W4"],
+          "width_px": 1600,
+          "height_px": 1200,
+          "dpi": 300,
+          "caption_seed": "Volcano plot of week-4 Control vs Dulse contrast; points coloured by BH-adjusted significance."
+        },
+        {
+          "path": "test_run/Figures/differential_abundance/taxa/top_candidates.pdf",
+          "kind": "top_candidates",
+          "format": "pdf",
+          "caption_seed": "Per-sample abundance distributions for the top DAA candidates across all pairwise contrasts."
+        }
+      ]
+    },
+
+    "network": {
+      "status": "complete",
+      "duration_s": 11.4,
+      "tables": [
+        {
+          "path": "test_run/Datasets/network/gephi_nodes.csv",
+          "kind": "network_nodes",
+          "format": "csv",
+          "schema": {
+            "id":     "string",
+            "label":  "string",
+            "degree": "integer",
+            "module": "integer"
+          },
+          "row_count": 187,
+          "description": "Network nodes with degree and Louvain module assignment."
+        },
+        {
+          "path": "test_run/Datasets/network/topology.csv",
+          "kind": "network_topology",
+          "format": "csv",
+          "schema": {
+            "metric": "string",
+            "value":  "double"
+          },
+          "row_count": 7,
+          "description": "Whole-network topology metrics (density, transitivity, modularity, etc.)."
+        }
+      ],
+      "figures": [
+        {
+          "path": "test_run/Figures/network/network.png",
+          "kind": "network_graph",
+          "width_px": 2400,
+          "height_px": 2400,
+          "dpi": 300,
+          "caption_seed": "Co-occurrence network of the top-50 hubs; nodes coloured by Louvain module, edge weight by SparCC correlation."
+        }
+      ]
+    }
+  },
+  "pipeline": {
+    "name":            "Metagenomics_pipeline_automation",
+    "repo":            "https://github.com/Julio92-C/Metagenomics_pipeline_automation",
+    "version":         "189f174",
+    "run_started_at":  "2026-05-30T13:45:59+00:00",
+    "run_finished_at": "2026-05-30T13:52:42+00:00"
+  }
+}
