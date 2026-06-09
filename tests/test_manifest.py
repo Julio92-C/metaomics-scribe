@@ -10,8 +10,8 @@ import pytest
 from pydantic import ValidationError
 
 from metaomics_scribe.manifest import (
-    Manifest,
     SUPPORTED_MAJOR,
+    Manifest,
     UnsupportedManifestVersion,
     load_manifest,
 )
