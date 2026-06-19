@@ -30,16 +30,22 @@ def test_loads_example_end_to_end():
 
 
 def test_panels_stage_loads():
-    """The 1.2 `panels` stage exposes composites tagged kind=panel_composite + slot + section."""
+    """The 1.2 `panels` stage exposes composites tagged kind=panel_composite,
+    plus slot / section / subsection fields."""
     m = load_manifest(EXAMPLE)
     panels_stage = m.stages.get("panels")
     assert panels_stage is not None
     composites = [f for f in panels_stage.figures if f.kind == "panel_composite"]
     slots = {f.slot for f in composites}
     sections = {f.section for f in composites}
+    subsections = {f.subsection for f in composites}
     assert "fig01_taxa_overview" in slots
     assert "figS00_heatmap_species" in slots
     assert sections == {"main", "supplementary"}
+    # Example composite carries community_overview; the supplementary one
+    # intentionally has no subsection to exercise the None-bucket path.
+    assert "community_overview" in subsections
+    assert None in subsections
 
 
 def test_find_panel_returns_match_and_none():

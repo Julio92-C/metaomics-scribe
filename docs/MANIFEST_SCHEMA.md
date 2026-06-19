@@ -207,17 +207,19 @@ Each composite Figure adds two optional fields to the normal Figure shape:
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `kind` | string | yes | Always `"panel_composite"` for these entries — distinguishes them from per-panel artifacts emitted by other stages. |
-| `slot` | string | yes (for composites) | Matches the journal slot id (`fig01_taxa_overview`, `figS00c_rarefaction_curves`, …). Determines the output filename `runs/<study_id>/figures/<slot>.<ext>`. |
-| `section` | string | yes (for composites) | `"main"` or `"supplementary"`. The agent uses this to bucket outputs for downstream packaging; routing itself is keyed on `slot`. |
+| `slot` | string | yes (for composites) | The slot id (`fig01_taxa_overview`, `figS00c_rarefaction_curves`, …). Drives the output filename `runs/<study_id>/figures/<slot>.<ext>`. The journal does not enumerate slot ids — the pipeline is the source of truth. |
+| `section` | string | yes (for composites) | `"main"` or `"supplementary"`. The drafter uses this to decide where the figure is referenced. |
+| `subsection` | string | no but recommended | The results subsection id this composite belongs to (e.g. `"resistome"`). Matches a `Subsection.id` in the journal template. Drafter uses this to group figures under the right results subsection. |
 | `path` | string | yes | Relative to `outputs.project_root`, same rule as every other stage path. |
 | `format` | string | no | Inferred from the path suffix when absent. Use `tiff` for Frontiers; `png` is also accepted. |
-| `caption_seed` | string | no but recommended | Short pipeline-written description (1–2 sentences). The agent prepends the journal-side `title` and writes the result to `<slot>.caption.txt`. |
+| `caption_seed` | string | no but recommended | Short pipeline-written description (1–2 sentences). Written verbatim to `<slot>.caption.txt`. |
 
-Slot ids are the contract between pipeline and journal. The journal template
-lists the same ids in manuscript order; the agent calls `Manifest.find_panel(slot_id)`
-which scans `stages["panels"].figures` for a `panel_composite` whose `slot`
-matches. A slot id that isn't emitted causes the builder to raise — composites
-are never silently skipped.
+Slot ids are emitted by the pipeline; the journal template does not enumerate
+them. The agent routes every `panel_composite` the manifest declares via
+`FigureBuilder.build_all()` and groups them by `subsection` so the drafter can
+fill each results subsection with the right composites. A slot whose source
+file is missing on disk causes the builder to raise — composites are never
+silently skipped.
 
 The per-panel `figures` entries on other stages (taxonomy, alpha_diversity, …)
 are preserved for traceability (so the agent can cite the source of each panel
@@ -303,10 +305,11 @@ Stable strings the agent uses to route artifacts to manuscript sections. Add new
     above). The pipeline now ships pre-stitched multi-panel manuscript
     composites under `Figures/panels/{main,supplementary}/` and surfaces them
     through a dedicated `panels` stage. Each composite is a normal `Figure`
-    with `kind: "panel_composite"`, plus two new optional fields — `slot`
-    (manuscript slot id) and `section` (`"main"` or `"supplementary"`). The
-    agent looks up each slot via `Manifest.find_panel(slot_id)` and routes
-    the file into manuscript position; no per-panel stitching anymore.
+    with `kind: "panel_composite"`, plus three new optional fields — `slot`
+    (manuscript slot id), `section` (`"main"` or `"supplementary"`), and
+    `subsection` (results subsection id, matches a journal `Subsection.id`).
+    The agent routes every composite via `FigureBuilder.build_all()` and
+    groups them by `subsection` for the drafter.
   - Bundled the literature-driven `kind` additions previously tracked in the
     deleted `docs/PIPELINE_V2_GAPS.md` (`rarefaction_curves`, `genus_heatmap`,
     `aldex2_maplot`/`aldex2_dotplot`, `arg_upset`, `arg_circos`,

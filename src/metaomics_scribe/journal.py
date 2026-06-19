@@ -1,10 +1,15 @@
 """Journal template loader.
 
 Each supported journal lives in `journals/<id>.yaml` as pure config: figure
-dimensions, citation style, IMRaD section order, word caps, and the mapping
-from manuscript figure slots to manifest figure `kind`s. Adding or tweaking a
-journal is a config edit, not a code change — these Pydantic models exist only
-to validate the YAML and expose typed access to it.
+dimensions, citation style, word caps, and the IMRaD section order of a
+manuscript drafted in that journal's style. Adding or tweaking a journal is a
+config edit, not a code change — these Pydantic models exist only to validate
+the YAML and expose typed access to it.
+
+The journal is *study-agnostic*. It does not enumerate figure slot ids or pin
+slots to subsections — that information lives in the pipeline's manifest (see
+the `panels` stage convention in `docs/MANIFEST_SCHEMA.md`). The same journal
+template drives any conforming pipeline run.
 """
 
 from __future__ import annotations
@@ -31,14 +36,13 @@ class JournalMeta(_Model):
 class Subsection(_Model):
     """A subsection inside a manuscript section.
 
-    `slots` (optional) pins one or more figure slot ids to this subsection so
-    the manuscript drafter knows which figures belong in the prose here. Slot
-    ids must match `FigureSlot.id` entries declared on the same journal.
+    Subsection ids are abstract topic names (``resistome``, ``virulome``, …).
+    They do not list which figures live where — that mapping is provided by
+    the pipeline via each panel composite's ``Figure.subsection`` field.
     """
 
     id: str
     title: str | None = None
-    slots: list[str] | None = None
 
 
 class Section(_Model):
@@ -95,37 +99,12 @@ class SupplementarySpec(_Model):
     formats_accepted: list[str] | None = None
 
 
-class FigureSlot(_Model):
-    """A manuscript figure position.
-
-    `id` matches a `Panel.id` in `manifest.panels.main` or
-    `manifest.panels.supplementary` — the pipeline emits one pre-stitched
-    composite per slot, so the journal template only needs to list slot ids
-    in manuscript order plus an optional human-readable title.
-    """
-
-    id: str
-    title: str | None = None
-
-
 class Journal(_Model):
     journal: JournalMeta
     manuscript: Manuscript
     figures: FiguresSpec
     tables: TablesSpec | None = None
     supplementary: SupplementarySpec | None = None
-    figure_slots: list[FigureSlot] = []
-    supplementary_slots: list[FigureSlot] = []
-
-    def slot(self, slot_id: str) -> FigureSlot:
-        """Return the figure or supplementary slot with the given id."""
-        for s in (*self.figure_slots, *self.supplementary_slots):
-            if s.id == slot_id:
-                return s
-        raise KeyError(
-            f"slot {slot_id!r} not found in journal {self.journal.id!r}; "
-            f"known slots: {[s.id for s in (*self.figure_slots, *self.supplementary_slots)]}"
-        )
 
 
 def load_journal(path: str | Path) -> Journal:

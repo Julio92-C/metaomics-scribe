@@ -309,6 +309,7 @@
           "kind":         "panel_composite",
           "format":       "tiff",
           "section":      "main",
+          "subsection":   "community_overview",
           "slot":         "fig01_taxa_overview",
           "caption_seed": "Taxonomic overview across Treatment x Time groups: alpha diversity (A), beta diversity (B), composition (C)."
         },
@@ -317,6 +318,7 @@
           "kind":         "panel_composite",
           "format":       "tiff",
           "section":      "main",
+          "subsection":   "community_overview",
           "slot":         "fig05_relative_abundance_species",
           "caption_seed": "Stacked-bar composition of the top-50 species per sample."
         },

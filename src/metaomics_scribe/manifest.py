@@ -94,10 +94,12 @@ class Figure(_Model):
     domain: str | None = None
     group: str | None = None
     # Pre-stitched manuscript composites (kind="panel_composite") emitted by
-    # the `panels` stage carry these two fields to identify which manuscript
-    # slot they fill and which section (main / supplementary) they belong to.
+    # the `panels` stage carry these fields to identify which manuscript slot
+    # they fill, which section (main / supplementary) they belong to, and
+    # which results subsection the drafter should reference them from.
     slot: str | None = None
     section: str | None = None
+    subsection: str | None = None
 
 
 class StatsText(_Model):

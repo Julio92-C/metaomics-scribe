@@ -1,13 +1,13 @@
-"""FigureBuilder tests — router-mode (schema 1.3+).
+"""FigureBuilder tests — router-mode, study-agnostic journal.
 
-The pipeline now ships pre-stitched manuscript composites and surfaces them
-through the manifest's `panels` block. These tests build a self-contained mini
-project (manifest.json + per-panel TIFF stubs) in tmp_path, then verify that
-`FigureBuilder.build(slot_id)` routes each composite to the runs directory,
-preserves the source extension, and writes the caption sidecar.
+The pipeline ships pre-stitched manuscript composites via a ``panels`` stage
+in the manifest. The journal template is study-agnostic: it carries journal
+style + IMRaD structure only, never an enumeration of figure slot ids. The
+router routes every ``panel_composite`` the manifest declares and groups
+them by the pipeline-emitted ``subsection`` field.
 
-An opt-in test reads `METAOMICS_REAL_FIXTURES` (the directory containing a real
-chicken_batch project) and exercises the router against real pipeline output.
+An opt-in test reads ``METAOMICS_REAL_FIXTURES`` (the directory containing a
+real pipeline project) and exercises the router against real output.
 """
 
 from __future__ import annotations
@@ -65,24 +65,32 @@ def _materialise_example(tmp_path: Path) -> Path:
     return manifest_dir / "manifest.json"
 
 
-def _minimal_journal(
-    tmp_path: Path, slot_ids_main: list[str], slot_ids_supp: list[str] = ()
-) -> Path:
-    """Write a stripped-down journal YAML so tests don't depend on the Frontiers
-    file's exact slot list. Slots have id + title only."""
+def _minimal_journal(tmp_path: Path) -> Path:
+    """Write a study-agnostic journal YAML for tests.
+
+    No slot lists, no per-subsection slot pins — matches the current
+    ``Journal`` model. Slots are discovered from the manifest at build time.
+    """
     data = {
         "journal": {"id": "test_journal", "name": "Test"},
-        "manuscript": {"citation_style": "frontiers", "sections": [{"id": "results"}]},
+        "manuscript": {
+            "citation_style": "frontiers",
+            "sections": [
+                {
+                    "id": "results",
+                    "subsections": [
+                        {"id": "community_overview", "title": "Community"},
+                        {"id": "resistome", "title": "Resistome"},
+                    ],
+                }
+            ],
+        },
         "figures": {
             "column_widths_mm": {"single": 85, "double": 180},
             "max_height_mm": 235,
             "dpi_min": 300,
             "preferred_format": "tiff",
         },
-        "figure_slots": [{"id": sid, "title": f"Title for {sid}"} for sid in slot_ids_main],
-        "supplementary_slots": [
-            {"id": sid, "title": f"Supp title for {sid}"} for sid in slot_ids_supp
-        ],
     }
     path = tmp_path / "test_journal.yaml"
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
@@ -99,16 +107,11 @@ def example_project(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def test_build_main_routes_composite(example_project: Path, tmp_path: Path):
-    """build() for a main slot copies the manifest-listed composite verbatim
-    and writes the caption sidecar."""
+def test_build_routes_one_composite(example_project: Path, tmp_path: Path):
+    """build() copies a single composite byte-for-byte and writes the caption."""
     m = load_manifest(example_project)
-    j_path = _minimal_journal(
-        tmp_path,
-        slot_ids_main=["fig01_taxa_overview", "fig05_relative_abundance_species"],
-    )
-    j = load_journal(j_path)
-    fb = FigureBuilder(m, j, output_root=tmp_path / "runs")
+    fb = FigureBuilder(m, load_journal(_minimal_journal(tmp_path)),
+                      output_root=tmp_path / "runs")
 
     built = fb.build("fig01_taxa_overview")
 
@@ -116,29 +119,40 @@ def test_build_main_routes_composite(example_project: Path, tmp_path: Path):
     assert built.out_path.name == "fig01_taxa_overview.tiff"
     assert built.out_path.parent.name == "figures"
     assert built.out_path.parent.parent.name == "chicken_batch2"
-
-    # Source and output must be byte-identical — no re-encoding.
+    assert built.section == "main"
+    assert built.subsection == "community_overview"
     assert _file_sha256(built.source_path) == _file_sha256(built.out_path)
 
     caption = built.caption_path.read_text(encoding="utf-8")
-    assert "Title for fig01_taxa_overview" in caption
-    assert "Taxonomic overview" in caption  # caption_seed text from example manifest
+    assert "Taxonomic overview" in caption
+    # No journal-side title prefix anymore — caption is the manifest seed only.
+    assert "Title for" not in caption
 
 
-def test_build_supplementary_routes_composite(example_project: Path, tmp_path: Path):
+def test_build_all_routes_every_composite(example_project: Path, tmp_path: Path):
+    """build_all() returns one BuiltFigure per panel_composite, in pipeline order."""
     m = load_manifest(example_project)
-    j_path = _minimal_journal(
-        tmp_path, slot_ids_main=[], slot_ids_supp=["figS00_heatmap_species"]
-    )
-    j = load_journal(j_path)
-    fb = FigureBuilder(m, j, output_root=tmp_path / "runs")
+    fb = FigureBuilder(m, load_journal(_minimal_journal(tmp_path)),
+                      output_root=tmp_path / "runs")
 
-    built = fb.build("figS00_heatmap_species")
-    assert built.out_path.exists()
-    assert built.out_path.name == "figS00_heatmap_species.tiff"
-    assert "Per-sample species-level abundance heatmap" in built.caption_path.read_text(
-        encoding="utf-8"
-    )
+    built = fb.build_all()
+    assert [bf.slot_id for bf in built] == m.panel_slot_ids()
+    assert all(bf.out_path.exists() for bf in built)
+
+
+def test_group_by_subsection_buckets_correctly(example_project: Path, tmp_path: Path):
+    """The example manifest has two community_overview composites and one
+    supplementary figure with no subsection — group_by_subsection must bucket
+    those as community_overview=2 and None=1."""
+    m = load_manifest(example_project)
+    fb = FigureBuilder(m, load_journal(_minimal_journal(tmp_path)),
+                      output_root=tmp_path / "runs")
+
+    groups = FigureBuilder.group_by_subsection(fb.build_all())
+    assert sorted(groups.keys(), key=lambda x: (x is None, x)) == ["community_overview", None]
+    assert len(groups["community_overview"]) == 2
+    assert len(groups[None]) == 1
+    assert groups[None][0].section == "supplementary"
 
 
 def test_build_preserves_png_extension(tmp_path: Path):
@@ -146,7 +160,6 @@ def test_build_preserves_png_extension(tmp_path: Path):
     data = json.loads(EXAMPLE_MANIFEST.read_text(encoding="utf-8"))
     manifest_dir = tmp_path / "project" / "run"
     manifest_dir.mkdir(parents=True)
-    # Replace the example's panels stage with a single PNG-format composite.
     png_rel = "test_run/Figures/panels/main/fig_demo.png"
     data["stages"]["panels"] = {
         "status": "complete",
@@ -157,6 +170,7 @@ def test_build_preserves_png_extension(tmp_path: Path):
                 "kind": "panel_composite",
                 "format": "png",
                 "section": "main",
+                "subsection": "resistome",
                 "slot": "fig_demo",
                 "caption_seed": "Demo PNG",
             }
@@ -166,8 +180,8 @@ def test_build_preserves_png_extension(tmp_path: Path):
     (tmp_path / png_rel).parent.mkdir(parents=True)
     Image.new("RGB", (800, 600), (255, 0, 0)).save(tmp_path / png_rel, format="PNG")
 
-    j_path = _minimal_journal(tmp_path, slot_ids_main=["fig_demo"])
-    fb = FigureBuilder(load_manifest(manifest_dir / "manifest.json"), load_journal(j_path),
+    fb = FigureBuilder(load_manifest(manifest_dir / "manifest.json"),
+                      load_journal(_minimal_journal(tmp_path)),
                       output_root=tmp_path / "runs")
 
     built = fb.build("fig_demo")
@@ -177,28 +191,13 @@ def test_build_preserves_png_extension(tmp_path: Path):
 
 
 def test_unknown_slot_raises(example_project: Path, tmp_path: Path):
+    """Asking for a slot that isn't in the manifest raises clearly."""
     m = load_manifest(example_project)
-    j_path = _minimal_journal(tmp_path, slot_ids_main=["fig01_taxa_overview"])
-    j = load_journal(j_path)
-    fb = FigureBuilder(m, j, output_root=tmp_path / "runs")
-
-    with pytest.raises(KeyError, match="not found"):
-        fb.build("fig99_does_not_exist")
-
-
-def test_slot_in_journal_but_missing_from_manifest_panels(example_project: Path, tmp_path: Path):
-    """A journal slot that has no composite in the `panels` stage must raise a
-    clear error — silent skip would let an empty figure ship to the manuscript."""
-    m = load_manifest(example_project)
-    j_path = _minimal_journal(
-        tmp_path,
-        slot_ids_main=["fig01_taxa_overview", "fig07_sankey_vf"],  # second isn't emitted
-    )
-    j = load_journal(j_path)
-    fb = FigureBuilder(m, j, output_root=tmp_path / "runs")
+    fb = FigureBuilder(m, load_journal(_minimal_journal(tmp_path)),
+                      output_root=tmp_path / "runs")
 
     with pytest.raises(RuntimeError, match="no entry in the manifest `panels` stage"):
-        fb.build("fig07_sankey_vf")
+        fb.build("fig_does_not_exist")
 
 
 def test_panel_listed_but_file_missing_on_disk(example_project: Path, tmp_path: Path):
@@ -208,96 +207,50 @@ def test_panel_listed_but_file_missing_on_disk(example_project: Path, tmp_path: 
     assert panel is not None
     m.resolve_path(panel.path).unlink()
 
-    j_path = _minimal_journal(tmp_path, slot_ids_main=["fig01_taxa_overview"])
-    j = load_journal(j_path)
-    fb = FigureBuilder(m, j, output_root=tmp_path / "runs")
+    fb = FigureBuilder(m, load_journal(_minimal_journal(tmp_path)),
+                      output_root=tmp_path / "runs")
 
     with pytest.raises(RuntimeError, match="missing on disk"):
         fb.build("fig01_taxa_overview")
 
 
-def test_caption_handles_missing_seed(tmp_path: Path):
-    """If the pipeline omitted caption_seed, the sidecar still gets the title."""
-    data = json.loads(EXAMPLE_MANIFEST.read_text(encoding="utf-8"))
-    manifest_dir = tmp_path / "project" / "run"
-    manifest_dir.mkdir(parents=True)
-    rel = "test_run/Figures/panels/main/fig_noseed.tiff"
-    data["stages"]["panels"] = {
-        "status": "complete",
-        "tables": [],
-        "figures": [
-            {
-                "path": rel,
-                "kind": "panel_composite",
-                "format": "tiff",
-                "section": "main",
-                "slot": "fig_noseed",
-            }
-        ],
-    }
-    (manifest_dir / "manifest.json").write_text(json.dumps(data), encoding="utf-8")
-    _stamp_tiff(tmp_path / rel, 400, 300, (0, 0, 0))
-
-    j_path = _minimal_journal(tmp_path, slot_ids_main=["fig_noseed"])
-    fb = FigureBuilder(load_manifest(manifest_dir / "manifest.json"), load_journal(j_path),
-                      output_root=tmp_path / "runs")
-
-    built = fb.build("fig_noseed")
-    caption = built.caption_path.read_text(encoding="utf-8")
-    assert "Title for fig_noseed" in caption
-    assert caption.strip()  # not empty
-
-
 def test_manifest_without_panels_stage_raises(tmp_path: Path):
-    """An older manifest (no `panels` stage) cannot be routed — surface clearly
-    rather than crashing on attribute access."""
+    """An older manifest (no `panels` stage) cannot be routed — surface clearly."""
     data = json.loads(EXAMPLE_MANIFEST.read_text(encoding="utf-8"))
     data["stages"].pop("panels", None)
     manifest_dir = tmp_path / "project" / "run"
     manifest_dir.mkdir(parents=True)
     (manifest_dir / "manifest.json").write_text(json.dumps(data), encoding="utf-8")
 
-    j_path = _minimal_journal(tmp_path, slot_ids_main=["fig01_taxa_overview"])
-    fb = FigureBuilder(load_manifest(manifest_dir / "manifest.json"), load_journal(j_path),
+    fb = FigureBuilder(load_manifest(manifest_dir / "manifest.json"),
+                      load_journal(_minimal_journal(tmp_path)),
                       output_root=tmp_path / "runs")
 
     with pytest.raises(RuntimeError, match="no entry in the manifest `panels` stage"):
         fb.build("fig01_taxa_overview")
 
 
-def test_frontiers_journal_loads(example_project: Path, tmp_path: Path):
-    """Smoke test: the shipped Frontiers YAML parses against the slimmed
-    FigureSlot model and exposes the pipeline-named slot ids."""
+def test_frontiers_journal_has_no_slot_lists():
+    """The shipped Frontiers YAML must not enumerate slot ids — the template
+    is study-agnostic; slots live in the manifest."""
+    text = FRONTIERS_JOURNAL.read_text(encoding="utf-8")
+    assert "figure_slots:" not in text
+    assert "supplementary_slots:" not in text
+    assert "slots:" not in text  # also rules out subsection.slots pins
+
+    # And the model has no such attributes.
     j = load_journal(FRONTIERS_JOURNAL)
-    main_ids = [s.id for s in j.figure_slots]
-    assert "fig01_taxa_overview" in main_ids
-    assert "fig10_vf_arg_correlation" in main_ids
-    assert "fig08" not in "".join(main_ids)  # fig08 intentionally gapped
-
-    supp_ids = [s.id for s in j.supplementary_slots]
-    assert "figS00_heatmap_species" in supp_ids
+    assert not hasattr(j, "figure_slots")
+    assert not hasattr(j, "supplementary_slots")
 
 
-def test_results_subsections_pin_every_main_slot():
-    """Every main figure slot the journal declares must be pinned to exactly
-    one results subsection — otherwise the drafter can't decide where to write
-    the figure's prose."""
+def test_frontiers_journal_subsections_are_abstract():
+    """Frontiers results subsections are topic names, not figure pins."""
     j = load_journal(FRONTIERS_JOURNAL)
     results = next(s for s in j.manuscript.sections if s.id == "results")
     assert results.subsections is not None
-
-    pinned: dict[str, str] = {}
-    for sub in results.subsections:
-        for slot_id in sub.slots or []:
-            assert slot_id not in pinned, (
-                f"slot {slot_id!r} is pinned to both {pinned[slot_id]!r} "
-                f"and {sub.id!r} — must be exactly one subsection"
-            )
-            pinned[slot_id] = sub.id
-
-    main_slot_ids = {s.id for s in j.figure_slots}
-    unpinned = main_slot_ids - pinned.keys()
-    assert not unpinned, f"main slots not pinned to any subsection: {sorted(unpinned)}"
+    sub_ids = {s.id for s in results.subsections}
+    assert {"resistome", "virulome", "mobilome"} <= sub_ids
 
 
 # ---------------------------------------------------------------------------
@@ -307,15 +260,14 @@ def test_results_subsections_pin_every_main_slot():
 
 def test_supplementary_tables_routed(example_project: Path, tmp_path: Path):
     """build_supplementary_tables() copies the multi-sheet xlsx to runs/<study>/tables/."""
-    # Stamp a stand-in xlsx that the example manifest declares.
     xlsx_rel = "test_run/Datasets/panels/supplementary_tables.xlsx"
     src = tmp_path / xlsx_rel
     src.parent.mkdir(parents=True, exist_ok=True)
     src.write_bytes(b"PK\x03\x04 fake-xlsx-bytes-for-byte-identity-check")
 
     m = load_manifest(example_project)
-    j_path = _minimal_journal(tmp_path, slot_ids_main=[])
-    fb = FigureBuilder(m, load_journal(j_path), output_root=tmp_path / "runs")
+    fb = FigureBuilder(m, load_journal(_minimal_journal(tmp_path)),
+                      output_root=tmp_path / "runs")
 
     built = fb.build_supplementary_tables()
     assert built is not None
@@ -333,8 +285,8 @@ def test_supplementary_tables_returns_none_when_not_emitted(tmp_path: Path):
     manifest_dir.mkdir(parents=True)
     (manifest_dir / "manifest.json").write_text(json.dumps(data), encoding="utf-8")
 
-    j_path = _minimal_journal(tmp_path, slot_ids_main=[])
-    fb = FigureBuilder(load_manifest(manifest_dir / "manifest.json"), load_journal(j_path),
+    fb = FigureBuilder(load_manifest(manifest_dir / "manifest.json"),
+                      load_journal(_minimal_journal(tmp_path)),
                       output_root=tmp_path / "runs")
 
     assert fb.build_supplementary_tables() is None
@@ -343,8 +295,8 @@ def test_supplementary_tables_returns_none_when_not_emitted(tmp_path: Path):
 def test_supplementary_tables_missing_on_disk_raises(example_project: Path, tmp_path: Path):
     """Declared in manifest but file missing — fail loudly."""
     m = load_manifest(example_project)
-    j_path = _minimal_journal(tmp_path, slot_ids_main=[])
-    fb = FigureBuilder(m, load_journal(j_path), output_root=tmp_path / "runs")
+    fb = FigureBuilder(m, load_journal(_minimal_journal(tmp_path)),
+                      output_root=tmp_path / "runs")
 
     with pytest.raises(RuntimeError, match="missing on disk"):
         fb.build_supplementary_tables()
@@ -371,12 +323,9 @@ def test_real_chicken_batch(tmp_path: Path):
     j = load_journal(FRONTIERS_JOURNAL)
     fb = FigureBuilder(m, j, output_root=tmp_path / "runs")
 
-    # Route the first main slot the manifest actually lists.
     available = m.panel_slot_ids()
     assert available, "real manifest must include a `panels` stage"
-    target = next((s.id for s in j.figure_slots if s.id in available), None)
-    assert target, "no overlap between journal slots and manifest panels"
 
-    built = fb.build(target)
-    assert built.out_path.exists()
-    assert built.out_path.stat().st_size > 0
+    built = fb.build_all()
+    assert len(built) == len(available)
+    assert all(bf.out_path.exists() and bf.out_path.stat().st_size > 0 for bf in built)

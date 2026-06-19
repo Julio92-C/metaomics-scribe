@@ -1,6 +1,12 @@
 # Frontiers in Microbiology — manuscript template
 # Source: https://www.frontiersin.org/journals/microbiology/for-authors/author-guidelines
 # Update this file when the journal revises its guidelines.
+#
+# This template is study-agnostic: it carries only journal style + IMRaD
+# structure, not the specific figures of any one paper. Per-paper figure
+# emission lives in the pipeline's manifest.json (see MANIFEST_SCHEMA.md
+# §"The `panels` stage"). The agent routes every `panel_composite` the
+# pipeline emits — no journal-side allow-listing.
 
 journal:
   id:        frontiers_microbiome
@@ -12,11 +18,14 @@ journal:
 manuscript:
   citation_style: "frontiers"   # CSL id; agent resolves to a .csl file
   max_word_count: 12000         # Original Research; excludes abstract, refs, captions
-  max_main_figures: 9           # pipeline ships 9 main composites (fig08 reserved/skipped)
   max_main_tables: 5
 
-  # Order matters — agent drafts sections in this order, since later sections
-  # can ground their prose on numbers established in earlier ones.
+  # IMRaD section order — drafted sequentially so later sections can ground
+  # their prose on numbers established in earlier ones.
+  #
+  # Results subsections are abstract topic names. Each `panel_composite` in
+  # the manifest carries a `subsection` field telling the drafter which one
+  # it belongs to; the journal does not pin figure ids here.
   sections:
     - id: title
     - id: abstract
@@ -26,39 +35,29 @@ manuscript:
       min: 5
       max: 8
     - id: introduction
-      grounded_in: []                          # no manifest grounding required
+      grounded_in: []
     - id: methods
-      grounded_in: [study, config, pipeline]   # cite pipeline version + filters/stats
+      grounded_in: [study, config, pipeline]
       subsections:
         - id: study_design
         - id: sample_collection_and_sequencing
         - id: bioinformatic_pipeline
         - id: statistical_analysis
     - id: results
-      grounded_in: [stages]                    # every claim must cite a stage artifact
-      # Subsections follow the new per-figure layout the pipeline emits as
-      # `panel_composite`s. Each subsection's `slots:` pins the main figure(s)
-      # whose prose lives here. Supplementary figures are referenced from the
-      # relevant subsection text by id, not pinned.
+      grounded_in: [stages]
       subsections:
         - id: community_overview
           title: "Community-level overview and composition"
-          slots: [fig01_taxa_overview, fig05_relative_abundance_species]
         - id: resistome
           title: "Resistome"
-          slots: [fig02_resistome_overview]
         - id: virulome
           title: "Virulome"
-          slots: [fig03_virulome_overview]
         - id: mobilome
           title: "Mobilome"
-          slots: [fig04_mobilome_overview]
         - id: taxa_gene_associations
           title: "Taxa - gene-element associations"
-          slots: [fig06_chord, fig07_sankey_vf]
         - id: co_occurrence_network
           title: "Co-occurrence network and cross-domain correlations"
-          slots: [fig09_network, fig10_vf_arg_correlation]
     - id: discussion
       grounded_in: [stages]
     - id: conclusion
@@ -99,74 +98,3 @@ supplementary:
   separate_file: true
   max_items: null             # no hard cap
   formats_accepted: [pdf, docx, xlsx, csv, tsv]
-
-# Manuscript figure slots — pipeline-named composites.
-#
-# Each `id` must match a `panels.main[]` or `panels.supplementary[]` entry in
-# the pipeline's manifest.json (see MANIFEST_SCHEMA.md §panels). The pipeline
-# composes each multi-panel figure itself; the agent only routes the resulting
-# TIFF to runs/<study>/figures/<id>.tiff with a caption sidecar.
-#
-# Manuscript figure numbering follows the order of this list. `title` here is
-# the human-readable section title prepended to the manifest's `caption_seed`.
-figure_slots:
-
-  - id: fig01_taxa_overview
-    title: "Taxonomic overview"
-
-  - id: fig02_resistome_overview
-    title: "Resistome overview"
-
-  - id: fig03_virulome_overview
-    title: "Virulome overview"
-
-  - id: fig04_mobilome_overview
-    title: "Mobilome overview"
-
-  - id: fig05_relative_abundance_species
-    title: "Species-level relative abundance"
-
-  - id: fig06_chord
-    title: "ARG–taxa chord diagram"
-
-  - id: fig07_sankey_vf
-    title: "Virulence-factor taxa-to-function sankey"
-
-  # fig08 intentionally gapped — pipeline does not emit a fig08 composite.
-  # Renumbering would diverge from the pipeline's panel filenames; the agent
-  # treats the gap as a real numbering choice rather than a missing figure.
-
-  - id: fig09_network
-    title: "Co-occurrence network"
-
-  - id: fig10_vf_arg_correlation
-    title: "Virulence-factor — ARG correlation matrix"
-
-supplementary_slots:
-
-  - id: figS00_heatmap_species
-    title: "Per-sample species-level abundance heatmap"
-
-  - id: figS00b_network_degree_distribution
-    title: "Co-occurrence network degree distribution"
-
-  - id: figS00c_rarefaction_curves
-    title: "Rarefaction curves"
-
-  - id: figS01_heatmap_arg_genes
-    title: "ARG gene-level abundance heatmap"
-
-  - id: figS02_heatmap_vf_genes
-    title: "Virulence-factor gene-level abundance heatmap"
-
-  - id: figS_circos_chord_by_treatment
-    title: "Per-treatment ARG–taxa circos diagrams"
-
-  - id: figS_diet_effects_arg
-    title: "Dietary-treatment effects on the resistome"
-
-  - id: figS_diet_effects_mge
-    title: "Dietary-treatment effects on the mobilome"
-
-  - id: figS_diet_effects_vf
-    title: "Dietary-treatment effects on the virulome"
