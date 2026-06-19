@@ -12,7 +12,7 @@ journal:
 manuscript:
   citation_style: "frontiers"   # CSL id; agent resolves to a .csl file
   max_word_count: 12000         # Original Research; excludes abstract, refs, captions
-  max_main_figures: 8
+  max_main_figures: 9           # pipeline ships 9 main composites (fig08 reserved/skipped)
   max_main_tables: 5
 
   # Order matters — agent drafts sections in this order, since later sections
@@ -41,8 +41,8 @@ manuscript:
         - id: beta_diversity
         - id: taxonomic_composition
         - id: differential_abundance
-        - id: resistome_virulome_mobilome      # optional, only if those stages ran
-        - id: co_occurrence_network            # optional, only if network ran
+        - id: resistome_virulome_mobilome
+        - id: co_occurrence_network
     - id: discussion
       grounded_in: [stages]
     - id: conclusion
@@ -84,38 +84,73 @@ supplementary:
   max_items: null             # no hard cap
   formats_accepted: [pdf, docx, xlsx, csv, tsv]
 
-# Mapping from manuscript figure slots to candidate manifest figure kinds.
-# Agent picks the most-fitting kind per slot; absent kinds are skipped and the
-# slot reflows. Multi-panel slots compose several manifest figures into one.
+# Manuscript figure slots — pipeline-named composites.
+#
+# Each `id` must match a `panels.main[]` or `panels.supplementary[]` entry in
+# the pipeline's manifest.json (see MANIFEST_SCHEMA.md §panels). The pipeline
+# composes each multi-panel figure itself; the agent only routes the resulting
+# TIFF to runs/<study>/figures/<id>.tiff with a caption sidecar.
+#
+# Manuscript figure numbering follows the order of this list. `title` here is
+# the human-readable section title prepended to the manifest's `caption_seed`.
 figure_slots:
-  - id: fig1_overview
-    title: "Study design and sample overview"
-    panels:
-      - kind: composition_stacked_bar
-  - id: fig2_alpha_beta
-    title: "Alpha and beta diversity"
-    panels:
-      - kind: alpha_violin
-        metric: "Shannon diversity index"
-      - kind: alpha_violin
-        metric: "Richness"
-      - kind: pcoa_scatter
-  - id: fig3_daa
-    title: "Differentially abundant taxa"
-    panels:
-      - kind: volcano
-      - kind: top_candidates
-  - id: fig4_network
+
+  - id: fig01_taxa_overview
+    title: "Taxonomic overview"
+
+  - id: fig02_resistome_overview
+    title: "Resistome overview"
+
+  - id: fig03_virulome_overview
+    title: "Virulome overview"
+
+  - id: fig04_mobilome_overview
+    title: "Mobilome overview"
+
+  - id: fig05_relative_abundance_species
+    title: "Species-level relative abundance"
+
+  - id: fig06_chord
+    title: "ARG–taxa chord diagram"
+
+  - id: fig07_sankey_vf
+    title: "Virulence-factor taxa-to-function sankey"
+
+  # fig08 intentionally gapped — pipeline does not emit a fig08 composite.
+  # Renumbering would diverge from the pipeline's panel filenames; the agent
+  # treats the gap as a real numbering choice rather than a missing figure.
+
+  - id: fig09_network
     title: "Co-occurrence network"
-    panels:
-      - kind: network_graph
+
+  - id: fig10_vf_arg_correlation
+    title: "Virulence-factor — ARG correlation matrix"
 
 supplementary_slots:
-  - id: figS1_venn_heatmap
-    panels:
-      - kind: venn
-      - kind: taxa_heatmap
-  - id: figS2_all_alpha
-    panels:
-      - kind: alpha_violin
-        repeat_over: metric
+
+  - id: figS00_heatmap_species
+    title: "Per-sample species-level abundance heatmap"
+
+  - id: figS00b_network_degree_distribution
+    title: "Co-occurrence network degree distribution"
+
+  - id: figS00c_rarefaction_curves
+    title: "Rarefaction curves"
+
+  - id: figS01_heatmap_arg_genes
+    title: "ARG gene-level abundance heatmap"
+
+  - id: figS02_heatmap_vf_genes
+    title: "Virulence-factor gene-level abundance heatmap"
+
+  - id: figS_circos_chord_by_treatment
+    title: "Per-treatment ARG–taxa circos diagrams"
+
+  - id: figS_diet_effects_arg
+    title: "Dietary-treatment effects on the resistome"
+
+  - id: figS_diet_effects_mge
+    title: "Dietary-treatment effects on the mobilome"
+
+  - id: figS_diet_effects_vf
+    title: "Dietary-treatment effects on the virulome"

@@ -91,6 +91,8 @@ class Figure(_Model):
     groups: list[str] | None = None
     metric: str | None = None
     pair: list[str] | None = None
+    domain: str | None = None
+    group: str | None = None
 
 
 class StatsText(_Model):
@@ -112,8 +114,28 @@ class Pipeline(_Model):
     name: str
     repo: str
     version: str
-    run_started_at: datetime
-    run_finished_at: datetime
+    run_started_at: datetime | None = None
+    run_finished_at: datetime | None = None
+
+
+class Panel(_Model):
+    """A pre-stitched manuscript composite figure emitted by the pipeline.
+
+    Introduced in manifest schema 1.3. `id` is the slot id shared with the
+    journal template (e.g. `fig01_taxa_overview`, `figS00c_rarefaction_curves`).
+    """
+
+    id: str
+    path: str
+    format: str | None = None
+    caption_seed: str | None = None
+
+
+class Panels(_Model):
+    """Container for manuscript-ordered main + supplementary composites."""
+
+    main: list[Panel] = []
+    supplementary: list[Panel] = []
 
 
 class Manifest(_Model):
@@ -122,9 +144,24 @@ class Manifest(_Model):
     config: Config
     outputs: Outputs
     stages: dict[str, Stage]
+    panels: Panels | None = None
     pipeline: Pipeline
 
     _manifest_dir: Path | None = PrivateAttr(default=None)
+
+    def find_panel(self, slot_id: str) -> Panel | None:
+        """Return the panel composite with the given slot id, or ``None``.
+
+        Searches `panels.main` first, then `panels.supplementary`. Returns
+        ``None`` when the slot id isn't listed or `panels` is absent — callers
+        decide whether that's a hard error.
+        """
+        if self.panels is None:
+            return None
+        for p in (*self.panels.main, *self.panels.supplementary):
+            if p.id == slot_id:
+                return p
+        return None
 
     @property
     def manifest_dir(self) -> Path:

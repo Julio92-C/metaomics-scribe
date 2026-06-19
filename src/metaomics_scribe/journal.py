@@ -86,26 +86,17 @@ class SupplementarySpec(_Model):
     formats_accepted: list[str] | None = None
 
 
-class Panel(_Model):
-    """One panel inside a figure slot.
+class FigureSlot(_Model):
+    """A manuscript figure position.
 
-    `kind` is the manifest figure-kind to pull. `metric` and `pair` are optional
-    extra filters when several manifest figures share the same kind (e.g., two
-    `alpha_violin` figures distinguished by `metric`). `repeat_over` is reserved
-    for supplementary slots that expand into N panels (one per metric/pair); the
-    v0.2 builder ignores it.
+    `id` matches a `Panel.id` in `manifest.panels.main` or
+    `manifest.panels.supplementary` — the pipeline emits one pre-stitched
+    composite per slot, so the journal template only needs to list slot ids
+    in manuscript order plus an optional human-readable title.
     """
 
-    kind: str
-    metric: str | None = None
-    pair: list[str] | None = None
-    repeat_over: str | None = None
-
-
-class FigureSlot(_Model):
     id: str
     title: str | None = None
-    panels: list[Panel]
 
 
 class Journal(_Model):

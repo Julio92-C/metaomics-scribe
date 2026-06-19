@@ -37,6 +37,7 @@ htmlcov/
 
 # Generated manuscript artifacts (drafts live in runs/, not committed)
 runs/
+scratch/
 *.docx
 *.pdf
 *.tex

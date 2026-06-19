@@ -1,206 +1,130 @@
-"""Multi-panel figure composer.
+"""Figure router.
 
-Stitches manifest-referenced PNGs into journal-shaped composite figures. The
-manifest only points at *already-rendered* PNGs — this module composes them; it
-does not re-render plots. That means the source plots' fonts, axes, and colour
-scales are fixed at the pipeline stage and can't be tweaked here. Changing them
-requires a manifest change (a new figure kind, or a new pre-rendered variant).
+The upstream pipeline now composes every multi-panel manuscript figure itself
+and lists the resulting TIFFs/PNGs in the manifest's ``panels`` block (schema
+1.3+). The agent's job here is therefore narrow: for each manuscript slot id
+declared by the journal template, look the composite up in the manifest, copy
+the file verbatim to ``runs/<study_id>/figures/<slot_id>.<ext>``, and write a
+``<slot_id>.caption.txt`` sidecar combining the journal-side title with the
+manifest-side ``caption_seed``.
 
-Layout rules:
-- 1 panel  → 1x1
-- 2 panels → 1x2 (side by side)
-- 3 panels → 1x3
-- 4 panels → 2x2
-A panel whose `kind` is absent from the manifest reflows the grid — the slot is
-built from however many panels *did* resolve, rather than failing.
-
-Output: `runs/<study_id>/figures/<slot_id>.png` plus a sidecar
-`<slot_id>.caption.txt` concatenating each panel's `caption_seed`.
+No stitching. No re-encoding. No Pillow layout work. If the pipeline drifts
+(wrong DPI, missing file, slot id absent from the manifest) the builder raises
+loudly rather than papering over it — composite drift is a contract bug, not a
+soft warning.
 """
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from string import ascii_uppercase
 
-from PIL import Image, ImageDraw, ImageFont
-
-from metaomics_scribe.journal import Journal, Panel
-from metaomics_scribe.manifest import Figure, Manifest
-
-MM_PER_INCH = 25.4
-PANEL_LABEL_PT = 14
-PANEL_LABEL_MARGIN_PX = 18
+from .journal import Journal
+from .manifest import Manifest, Panel
 
 
 @dataclass(frozen=True)
-class ResolvedPanel:
-    """A panel whose manifest figure was found, with the absolute path to the PNG."""
+class BuiltFigure:
+    """Result of routing one slot. Returned by ``FigureBuilder.build``."""
 
-    panel: Panel
-    figure: Figure
-    abs_path: Path
+    slot_id: str
+    out_path: Path
+    caption_path: Path
+    source_path: Path
 
 
 class FigureBuilder:
-    """Compose journal-shaped figures from a manifest + journal template."""
+    """Route pre-stitched composites from the manifest into a manuscript run dir."""
 
-    def __init__(self, manifest: Manifest, journal: Journal, output_root: Path | None = None):
+    def __init__(self, manifest: Manifest, journal: Journal, output_root: str | Path = "runs"):
         self.manifest = manifest
         self.journal = journal
-        self.output_root = Path(output_root) if output_root else Path("runs")
+        self.output_root = Path(output_root)
 
     def _figures_dir(self) -> Path:
         return self.output_root / self.manifest.study.id / "figures"
 
-    def _all_figures(self) -> list[Figure]:
-        return [fig for stage in self.manifest.stages.values() for fig in stage.figures]
+    def _find_panel(self, slot_id: str) -> Panel:
+        """Locate the manifest panel for ``slot_id`` or raise a clear error.
 
-    def _match_panel(self, panel: Panel) -> ResolvedPanel | None:
-        """Find the single manifest figure that satisfies the panel's kind + filters.
-
-        Returns None if no match (the slot will reflow). If multiple candidates
-        match the kind and the panel has no disambiguating `metric`/`pair`, the
-        first occurrence wins — deterministic and good enough for v0.2.
+        The journal's slot list and the manifest's ``panels`` block share the
+        same ids by contract — a mismatch usually means the pipeline hasn't
+        re-emitted the manifest after a re-run, so the error message points
+        the human author at that.
         """
-        for fig in self._all_figures():
-            if fig.kind != panel.kind:
-                continue
-            if panel.metric is not None and fig.metric != panel.metric:
-                continue
-            if panel.pair is not None and fig.pair != panel.pair:
-                continue
-            abs_path = self.manifest.resolve_path(fig.path)
-            if not abs_path.exists():
-                continue
-            return ResolvedPanel(panel=panel, figure=fig, abs_path=abs_path)
-        return None
+        # Confirm the slot exists in the journal first — an unknown slot is a
+        # journal-template typo, not a pipeline issue.
+        self.journal.slot(slot_id)
 
-    def resolve_panels(self, slot_id: str) -> list[ResolvedPanel]:
-        """Return the panels that resolved, in slot order. Missing kinds are dropped."""
-        slot = self.journal.slot(slot_id)
-        resolved: list[ResolvedPanel] = []
-        for p in slot.panels:
-            r = self._match_panel(p)
-            if r is not None:
-                resolved.append(r)
-        return resolved
-
-    def build(self, slot_id: str) -> Path:
-        """Compose `slot_id` and write `<output_root>/<study_id>/figures/<slot_id>.png`.
-
-        Raises `RuntimeError` if no panels resolve — an empty figure is never a
-        useful output. Writes a sidecar `<slot_id>.caption.txt` with concatenated
-        `caption_seed` strings.
-        """
-        slot = self.journal.slot(slot_id)
-        resolved = self.resolve_panels(slot_id)
-        if not resolved:
+        panel = self.manifest.find_panel(slot_id)
+        if panel is None:
+            available = self._available_panel_ids()
             raise RuntimeError(
-                f"slot {slot_id!r} has no resolvable panels — all of "
-                f"{[p.kind for p in slot.panels]} were missing from the manifest"
+                f"slot {slot_id!r} has no entry in manifest `panels` — "
+                f"pipeline likely hasn't emitted the composite for it yet "
+                f"(available: {available})"
+            )
+        return panel
+
+    def _available_panel_ids(self) -> list[str]:
+        if self.manifest.panels is None:
+            return []
+        return [p.id for p in (*self.manifest.panels.main, *self.manifest.panels.supplementary)]
+
+    def build(self, slot_id: str) -> BuiltFigure:
+        """Route the composite for ``slot_id`` and write the caption sidecar.
+
+        Returns a ``BuiltFigure`` carrying the output path, the caption path,
+        and the resolved source path (useful for downstream provenance). The
+        output file extension matches the source — TIFFs stay TIFFs, PNGs stay
+        PNGs. The pipeline owns format choice.
+        """
+        panel = self._find_panel(slot_id)
+        slot = self.journal.slot(slot_id)
+
+        src_abs = self.manifest.resolve_path(panel.path)
+        if not src_abs.exists():
+            raise RuntimeError(
+                f"composite for slot {slot_id!r} declared in manifest but "
+                f"missing on disk: {src_abs}"
             )
 
-        target_width_px, target_height_px = self._slot_pixel_box()
-        composite = self._compose(resolved, target_width_px, target_height_px)
-
+        ext = self._resolve_extension(panel, src_abs)
         out_dir = self._figures_dir()
         out_dir.mkdir(parents=True, exist_ok=True)
-        out_png = out_dir / f"{slot_id}.png"
-        composite.save(out_png, format="PNG", dpi=(self.journal.figures.dpi_min,) * 2)
+        out_path = out_dir / f"{slot_id}.{ext}"
+        shutil.copyfile(src_abs, out_path)
 
         caption_path = out_dir / f"{slot_id}.caption.txt"
-        caption_path.write_text(self._build_caption(slot.title, resolved), encoding="utf-8")
-        return out_png
+        caption_path.write_text(
+            _build_caption(slot.title, panel.caption_seed), encoding="utf-8"
+        )
 
-    def _slot_pixel_box(self) -> tuple[int, int]:
-        """Resolve the journal's double-column width x max height in pixels at dpi_min.
-
-        Defaults to double-column when available (most multi-panel figures want
-        it); falls back to single-column otherwise. Max height defaults to a
-        4:3 box of the width if the journal doesn't constrain it.
-        """
-        cw = self.journal.figures.column_widths_mm
-        width_mm = cw.double or cw.one_half or cw.single
-        max_h_mm = self.journal.figures.max_height_mm or (width_mm * 0.75)
-        dpi = self.journal.figures.dpi_min
-        return (int(width_mm / MM_PER_INCH * dpi), int(max_h_mm / MM_PER_INCH * dpi))
+        return BuiltFigure(
+            slot_id=slot_id,
+            out_path=out_path,
+            caption_path=caption_path,
+            source_path=src_abs,
+        )
 
     @staticmethod
-    def _layout_for(n_panels: int) -> tuple[int, int]:
-        """Rows, cols. 1→1x1, 2→1x2, 3→1x3, 4→2x2. >4 not supported in v0.2."""
-        if n_panels == 1:
-            return (1, 1)
-        if n_panels == 2:
-            return (1, 2)
-        if n_panels == 3:
-            return (1, 3)
-        if n_panels == 4:
-            return (2, 2)
-        raise ValueError(f"v0.2 supports 1-4 panels per slot, got {n_panels}")
-
-    def _compose(
-        self, resolved: list[ResolvedPanel], target_w: int, target_h: int
-    ) -> Image.Image:
-        rows, cols = self._layout_for(len(resolved))
-        cell_w = target_w // cols
-        cell_h = target_h // rows
-        canvas = Image.new("RGB", (target_w, target_h), "white")
-        font = _load_label_font(self.journal.figures.dpi_min)
-
-        for idx, rp in enumerate(resolved):
-            row, col = divmod(idx, cols)
-            with Image.open(rp.abs_path) as src:
-                panel_img = _fit_into(src.convert("RGB"), cell_w, cell_h)
-            x = col * cell_w + (cell_w - panel_img.width) // 2
-            y = row * cell_h + (cell_h - panel_img.height) // 2
-            canvas.paste(panel_img, (x, y))
-            _draw_panel_label(canvas, ascii_uppercase[idx], x, y, font)
-        return canvas
-
-    @staticmethod
-    def _build_caption(slot_title: str | None, resolved: list[ResolvedPanel]) -> str:
-        header = slot_title or ""
-        lines: list[str] = []
-        if header:
-            lines.append(header)
-            lines.append("")
-        for idx, rp in enumerate(resolved):
-            seed = rp.figure.caption_seed or f"(no caption seed for {rp.figure.kind})"
-            lines.append(f"({ascii_uppercase[idx]}) {seed}")
-        return "\n".join(lines) + "\n"
+    def _resolve_extension(panel: Panel, src_abs: Path) -> str:
+        """Decide the output extension. Prefer the path suffix; fall back to ``format``."""
+        suffix = src_abs.suffix.lstrip(".").lower()
+        if suffix:
+            return suffix
+        if panel.format:
+            return panel.format.lower()
+        raise RuntimeError(
+            f"cannot determine output extension for panel {panel.id!r} — "
+            f"path has no suffix and no `format` field"
+        )
 
 
-def _fit_into(img: Image.Image, max_w: int, max_h: int) -> Image.Image:
-    """Resize preserving aspect ratio so the image fits inside max_w x max_h."""
-    scale = min(max_w / img.width, max_h / img.height)
-    new_w = max(1, int(img.width * scale))
-    new_h = max(1, int(img.height * scale))
-    return img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-
-
-def _load_label_font(dpi: int) -> ImageFont.ImageFont:
-    """Best-effort load of a bold sans-serif for panel labels. Falls back to default."""
-    size_px = max(12, int(PANEL_LABEL_PT * dpi / 72))
-    for candidate in ("DejaVuSans-Bold.ttf", "arialbd.ttf", "Arial Bold.ttf"):
-        try:
-            return ImageFont.truetype(candidate, size=size_px)
-        except OSError:
-            continue
-    return ImageFont.load_default()
-
-
-def _draw_panel_label(
-    canvas: Image.Image, label: str, x: int, y: int, font: ImageFont.ImageFont
-) -> None:
-    draw = ImageDraw.Draw(canvas)
-    draw.text(
-        (x + PANEL_LABEL_MARGIN_PX, y + PANEL_LABEL_MARGIN_PX),
-        label,
-        fill="black",
-        font=font,
-    )
-
-
-__all__ = ["FigureBuilder", "ResolvedPanel"]
+def _build_caption(title: str | None, caption_seed: str | None) -> str:
+    """Join the journal title and pipeline caption_seed into a sidecar string."""
+    parts = [s for s in (title, caption_seed) if s]
+    if not parts:
+        return ""
+    return "\n\n".join(parts) + "\n"

@@ -13,11 +13,12 @@ The single contract between the upstream metagenomics pipeline and `metaomics-sc
 
 ```jsonc
 {
-  "manifest_version": "1.0",
+  "manifest_version": "1.3",
   "study": { ... },        // describes the experiment
   "config": { ... },       // pipeline configuration snapshot (filters, stats params)
   "outputs": { ... },      // base directories (paths in stages are relative to these)
-  "stages": { ... },       // per-stage artifact inventory
+  "stages": { ... },       // per-stage per-panel artifact inventory
+  "panels":  { ... },      // (1.3) pre-stitched manuscript composites
   "pipeline": { ... }      // pipeline identity + run timing
 }
 ```
@@ -161,6 +162,56 @@ Plain-text artifacts (PERMANOVA, PERMDISP, Kruskal-Wallis output). The agent par
 }
 ```
 
+## `panels` *(1.3)*
+
+The pipeline now composes the final multi-panel manuscript figures itself (one
+TIFF/PNG per manuscript figure, with panel labels A/B/C… already baked in).
+The `panels` block surfaces those composites by **slot id**, so the agent can
+route them to manuscript positions without re-stitching per-panel artifacts.
+
+```jsonc
+"panels": {
+  "main": [
+    {
+      "id":           "fig01_taxa_overview",
+      "path":         "test_run/Figures/panels/main/fig01_taxa_overview.tiff",
+      "format":       "tiff",
+      "caption_seed": "Taxonomic overview across treatment groups: alpha diversity (A), beta diversity (B), composition (C)."
+    },
+    {
+      "id":           "fig02_resistome_overview",
+      "path":         "test_run/Figures/panels/main/fig02_resistome_overview.tiff",
+      "format":       "tiff",
+      "caption_seed": "Resistome overview: drug-class composition (A), ARG totals (B), Venn (C), abundance violin (D), PCoA (E)."
+    }
+  ],
+  "supplementary": [
+    {
+      "id":           "figS00_heatmap_species",
+      "path":         "test_run/Figures/panels/supplementary/figS00_heatmap_species.tiff",
+      "format":       "tiff",
+      "caption_seed": "Per-sample species-level abundance heatmap."
+    }
+  ]
+}
+```
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `id` | string | yes | Matches the journal slot id (`fig01_taxa_overview`, `figS00c_rarefaction_curves`, …). Determines the output filename `runs/<study_id>/figures/<id>.<ext>`. |
+| `path` | string | yes | Relative to `outputs.project_root`, same rule as stage paths. |
+| `format` | string | no | `tiff`, `tif`, or `png`. Inferred from the path suffix when absent. |
+| `caption_seed` | string | no | Short pipeline-written description. The agent prepends the journal-side `title` and writes the result to `<id>.caption.txt`. |
+
+Slot ids are the contract between pipeline and journal. The journal template
+lists the same ids in manuscript order; the agent looks each one up here. A
+slot id that doesn't appear in either `main` or `supplementary` causes the
+builder to raise — composites are never silently skipped.
+
+The `stages.*.figures` per-panel entries are preserved for traceability (so the
+agent can cite the source of each composite) but are not consumed for manuscript
+figure routing in 1.3+.
+
 ## `pipeline`
 
 Provenance — never inferred, always emitted.
@@ -202,11 +253,21 @@ Stable strings the agent uses to route artifacts to manuscript sections. Add new
 | `taxa_heatmap` | taxonomy |
 | `composition_stacked_bar` | relative_abundance |
 | `species_count` / `species_prevalence` | relative_abundance |
+| `composition_unique_species` *(1.1)* | relative_abundance |
+| `composition_shared_species` *(1.1)* | relative_abundance |
 | `alpha_violin` / `alpha_bar` | alpha_diversity |
 | `pcoa_scatter` | beta_diversity |
 | `aldex_plot` / `volcano` / `top_candidates` | differential_abundance |
+| `taxa_daa_heatmap` *(1.1)* | differential_abundance |
 | `ge_*` (per-domain variants) | resistome / virulome / mobilome |
+| `ge_alpha_shannon_bar` / `ge_alpha_shannon_violin` *(1.1)* | resistome / virulome / mobilome |
+| `taxa_ges_composition` *(1.1)* | resistome (or a dedicated stage) — stacked-bar of taxa carrying gene elements, distinct from the generic `composition_stacked_bar` from `relative_abundance` |
+| `ge_venn_args` *(1.1)* | resistome |
+| `ge_pheatmap_genes` (existing, also virulome A/B split) | resistome / virulome / mobilome |
+| `species_count_genmap` *(1.1)* | resistome / virulome (per-organism count + gene neighbourhood) |
+| `connectivity_venn_taxa` / `connectivity_venn_genesets` *(1.1)* | network |
 | `network_graph` / `chord` / `sankey` / `degree_distribution` | network |
+| `sankey_png` *(1.1)* | network (PNG render of the HTML sankey, for journal figure use) |
 
 ### Stats text
 
@@ -222,6 +283,44 @@ Stable strings the agent uses to route artifacts to manuscript sections. Add new
 - Adding a new optional field or a new `kind` is **MINOR**.
 - Renaming a field, changing a field's type, or removing a `kind` is **MAJOR**.
 - The agent refuses to run against a `MAJOR` it does not understand.
+
+### Changelog
+
+- **1.3** *(current)*
+  - Added the top-level `panels` block (see `panels` section above). The
+    pipeline now ships pre-stitched multi-panel manuscript composites under
+    `Figures/panels/{main,supplementary}/`; this block surfaces them to the
+    agent by slot id, replacing the per-panel stitching the agent used to do.
+  - The `stages.*.figures` entries remain valid and unchanged — they document
+    every per-panel artifact for traceability — but the figure builder reads
+    `panels` exclusively for manuscript composition in 1.3+.
+- **1.2** *(emitted by pipeline as of 2026-06; superseded by 1.3 for figure routing)*
+  - Bundled the literature-driven `kind` additions tracked in
+    `docs/PIPELINE_V2_GAPS.md` (`rarefaction_curves`, `genus_heatmap`,
+    `aldex2_maplot`/`aldex2_dotplot`, `arg_upset`, `arg_circos`,
+    `vf_arg_corr_heatmap`, `mantel_triangle`, `sankey_taxon_arg_mge`,
+    `mobile_fraction_bar`, plus the 1.1 carry-forwards).
+  - Pure additive on top of 1.1 — no field renames or removals.
+- **1.1** *(proposed; pipeline-side emission TBD)*
+  - Loosened `pipeline.run_started_at` / `run_finished_at` to allow `null` when
+    the pipeline didn't capture the timestamp.
+  - Added optional `Figure.domain` (resistome / virulome / mobilome) and
+    `Figure.group` (per-group variants like `chord_Dulce.png`).
+  - Added the *(1.1)* `kind` entries in the table above. These are the new
+    artifacts the journal templates (Frontiers, etc.) need to compose the
+    chicken_batch1 paper figures without ad-hoc filename parsing. Pipelines
+    that haven't been updated to emit them still validate as 1.x — the agent
+    just reflows or skips slots whose `kind` isn't present.
+  - Added `taxa_ges_composition` kind — stacked-bar composition of taxa
+    carrying gene elements (ARGs / VFs / MGEs), produced by the resistome or
+    a dedicated stage. Distinct from `composition_stacked_bar` (which shows
+    overall relative abundance from the `relative_abundance` stage). The
+    separation prevents the two manuscript figures (Fig 3 and Fig 9) from
+    accidentally resolving to the same source PNG.
+  - Added optional `Panel.stage` field to the journal template spec — lets a
+    panel declaration pin its `kind` lookup to a specific manifest stage name,
+    providing an additional disambiguation axis beyond `metric` / `domain` /
+    `pair` / `group`.
 
 ## Validation
 
