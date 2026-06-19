@@ -29,7 +29,16 @@ class JournalMeta(_Model):
 
 
 class Subsection(_Model):
+    """A subsection inside a manuscript section.
+
+    `slots` (optional) pins one or more figure slot ids to this subsection so
+    the manuscript drafter knows which figures belong in the prose here. Slot
+    ids must match `FigureSlot.id` entries declared on the same journal.
+    """
+
     id: str
+    title: str | None = None
+    slots: list[str] | None = None
 
 
 class Section(_Model):

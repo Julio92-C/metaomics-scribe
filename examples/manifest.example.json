@@ -295,7 +295,14 @@
     "panels": {
       "status": "complete",
       "duration_s": 12.4,
-      "tables": [],
+      "tables": [
+        {
+          "path":        "test_run/Datasets/panels/supplementary_tables.xlsx",
+          "kind":        "supplementary_tables",
+          "format":      "xlsx",
+          "description": "Multi-tab supplementary tables — one sheet per table kind across the run, plus an Index sheet."
+        }
+      ],
       "figures": [
         {
           "path":         "test_run/Figures/panels/main/fig01_taxa_overview.tiff",

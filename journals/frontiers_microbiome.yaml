@@ -36,13 +36,29 @@ manuscript:
         - id: statistical_analysis
     - id: results
       grounded_in: [stages]                    # every claim must cite a stage artifact
+      # Subsections follow the new per-figure layout the pipeline emits as
+      # `panel_composite`s. Each subsection's `slots:` pins the main figure(s)
+      # whose prose lives here. Supplementary figures are referenced from the
+      # relevant subsection text by id, not pinned.
       subsections:
-        - id: alpha_diversity
-        - id: beta_diversity
-        - id: taxonomic_composition
-        - id: differential_abundance
-        - id: resistome_virulome_mobilome
+        - id: community_overview
+          title: "Community-level overview and composition"
+          slots: [fig01_taxa_overview, fig05_relative_abundance_species]
+        - id: resistome
+          title: "Resistome"
+          slots: [fig02_resistome_overview]
+        - id: virulome
+          title: "Virulome"
+          slots: [fig03_virulome_overview]
+        - id: mobilome
+          title: "Mobilome"
+          slots: [fig04_mobilome_overview]
+        - id: taxa_gene_associations
+          title: "Taxa - gene-element associations"
+          slots: [fig06_chord, fig07_sankey_vf]
         - id: co_occurrence_network
+          title: "Co-occurrence network and cross-domain correlations"
+          slots: [fig09_network, fig10_vf_arg_correlation]
     - id: discussion
       grounded_in: [stages]
     - id: conclusion

@@ -125,6 +125,7 @@ class Pipeline(_Model):
 
 PANELS_STAGE = "panels"
 PANEL_COMPOSITE_KIND = "panel_composite"
+SUPPLEMENTARY_TABLES_KIND = "supplementary_tables"
 
 
 class Manifest(_Model):
@@ -163,6 +164,21 @@ class Manifest(_Model):
             for fig in stage.figures
             if fig.kind == PANEL_COMPOSITE_KIND and fig.slot is not None
         ]
+
+    def find_panel_table(self, table_kind: str) -> Table | None:
+        """Return the first table in the `panels` stage with the given kind.
+
+        Used to surface manuscript-level tables the pipeline composes itself
+        (currently the multi-sheet ``supplementary_tables.xlsx``). Returns
+        ``None`` when the kind isn't emitted or the `panels` stage is absent.
+        """
+        stage = self.stages.get(PANELS_STAGE)
+        if stage is None:
+            return None
+        for table in stage.tables:
+            if table.kind == table_kind:
+                return table
+        return None
 
     @property
     def manifest_dir(self) -> Path:

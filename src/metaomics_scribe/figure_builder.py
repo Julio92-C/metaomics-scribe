@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .journal import Journal
-from .manifest import Figure, Manifest
+from .manifest import SUPPLEMENTARY_TABLES_KIND, Figure, Manifest
 
 
 @dataclass(frozen=True)
@@ -34,6 +34,16 @@ class BuiltFigure:
     slot_id: str
     out_path: Path
     caption_path: Path
+    source_path: Path
+
+
+@dataclass(frozen=True)
+class BuiltTable:
+    """Result of routing a manuscript-level table. Returned by
+    ``FigureBuilder.build_supplementary_tables``."""
+
+    kind: str
+    out_path: Path
     source_path: Path
 
 
@@ -47,6 +57,9 @@ class FigureBuilder:
 
     def _figures_dir(self) -> Path:
         return self.output_root / self.manifest.study.id / "figures"
+
+    def _tables_dir(self) -> Path:
+        return self.output_root / self.manifest.study.id / "tables"
 
     def _find_panel(self, slot_id: str) -> Figure:
         """Locate the manifest panel composite for ``slot_id`` or raise.
@@ -105,6 +118,39 @@ class FigureBuilder:
             caption_path=caption_path,
             source_path=src_abs,
         )
+
+    def build_supplementary_tables(self) -> BuiltTable | None:
+        """Route the pipeline's multi-sheet supplementary-tables xlsx.
+
+        Looks for a Table with ``kind == "supplementary_tables"`` in the
+        ``panels`` stage and copies it verbatim to
+        ``runs/<study_id>/tables/supplementary_tables.<ext>``. Returns
+        ``None`` when the pipeline didn't emit one (older runs); raises if it
+        was declared but the file is missing on disk.
+        """
+        table = self.manifest.find_panel_table(SUPPLEMENTARY_TABLES_KIND)
+        if table is None:
+            return None
+
+        src_abs = self.manifest.resolve_path(table.path)
+        if not src_abs.exists():
+            raise RuntimeError(
+                f"supplementary tables declared in manifest but missing on disk: {src_abs}"
+            )
+
+        ext = src_abs.suffix.lstrip(".").lower() or (table.format or "").lower()
+        if not ext:
+            raise RuntimeError(
+                f"cannot determine extension for supplementary tables — "
+                f"path {table.path!r} has no suffix and no `format` field"
+            )
+
+        out_dir = self._tables_dir()
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"{SUPPLEMENTARY_TABLES_KIND}.{ext}"
+        shutil.copyfile(src_abs, out_path)
+
+        return BuiltTable(kind=SUPPLEMENTARY_TABLES_KIND, out_path=out_path, source_path=src_abs)
 
     @staticmethod
     def _resolve_extension(panel: Figure, src_abs: Path) -> str:

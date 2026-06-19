@@ -278,6 +278,78 @@ def test_frontiers_journal_loads(example_project: Path, tmp_path: Path):
     assert "figS00_heatmap_species" in supp_ids
 
 
+def test_results_subsections_pin_every_main_slot():
+    """Every main figure slot the journal declares must be pinned to exactly
+    one results subsection — otherwise the drafter can't decide where to write
+    the figure's prose."""
+    j = load_journal(FRONTIERS_JOURNAL)
+    results = next(s for s in j.manuscript.sections if s.id == "results")
+    assert results.subsections is not None
+
+    pinned: dict[str, str] = {}
+    for sub in results.subsections:
+        for slot_id in sub.slots or []:
+            assert slot_id not in pinned, (
+                f"slot {slot_id!r} is pinned to both {pinned[slot_id]!r} "
+                f"and {sub.id!r} — must be exactly one subsection"
+            )
+            pinned[slot_id] = sub.id
+
+    main_slot_ids = {s.id for s in j.figure_slots}
+    unpinned = main_slot_ids - pinned.keys()
+    assert not unpinned, f"main slots not pinned to any subsection: {sorted(unpinned)}"
+
+
+# ---------------------------------------------------------------------------
+# supplementary tables routing
+# ---------------------------------------------------------------------------
+
+
+def test_supplementary_tables_routed(example_project: Path, tmp_path: Path):
+    """build_supplementary_tables() copies the multi-sheet xlsx to runs/<study>/tables/."""
+    # Stamp a stand-in xlsx that the example manifest declares.
+    xlsx_rel = "test_run/Datasets/panels/supplementary_tables.xlsx"
+    src = tmp_path / xlsx_rel
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_bytes(b"PK\x03\x04 fake-xlsx-bytes-for-byte-identity-check")
+
+    m = load_manifest(example_project)
+    j_path = _minimal_journal(tmp_path, slot_ids_main=[])
+    fb = FigureBuilder(m, load_journal(j_path), output_root=tmp_path / "runs")
+
+    built = fb.build_supplementary_tables()
+    assert built is not None
+    assert built.out_path.name == "supplementary_tables.xlsx"
+    assert built.out_path.parent.name == "tables"
+    assert built.out_path.parent.parent.name == "chicken_batch2"
+    assert _file_sha256(built.source_path) == _file_sha256(built.out_path)
+
+
+def test_supplementary_tables_returns_none_when_not_emitted(tmp_path: Path):
+    """A manifest without a supplementary_tables Table just returns None."""
+    data = json.loads(EXAMPLE_MANIFEST.read_text(encoding="utf-8"))
+    data["stages"]["panels"]["tables"] = []
+    manifest_dir = tmp_path / "project" / "run"
+    manifest_dir.mkdir(parents=True)
+    (manifest_dir / "manifest.json").write_text(json.dumps(data), encoding="utf-8")
+
+    j_path = _minimal_journal(tmp_path, slot_ids_main=[])
+    fb = FigureBuilder(load_manifest(manifest_dir / "manifest.json"), load_journal(j_path),
+                      output_root=tmp_path / "runs")
+
+    assert fb.build_supplementary_tables() is None
+
+
+def test_supplementary_tables_missing_on_disk_raises(example_project: Path, tmp_path: Path):
+    """Declared in manifest but file missing — fail loudly."""
+    m = load_manifest(example_project)
+    j_path = _minimal_journal(tmp_path, slot_ids_main=[])
+    fb = FigureBuilder(m, load_journal(j_path), output_root=tmp_path / "runs")
+
+    with pytest.raises(RuntimeError, match="missing on disk"):
+        fb.build_supplementary_tables()
+
+
 # ---------------------------------------------------------------------------
 # opt-in real-fixture test
 # ---------------------------------------------------------------------------
