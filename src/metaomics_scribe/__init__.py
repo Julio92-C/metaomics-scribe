@@ -7,15 +7,18 @@ from metaomics_scribe.manifest import (
     UnsupportedManifestVersion,
     load_manifest,
 )
+from metaomics_scribe.manuscript import DraftedManuscript, ManuscriptDrafter
 
 __version__ = "0.0.0"
 
 __all__ = [
     "BuiltFigure",
     "BuiltTable",
+    "DraftedManuscript",
     "FigureBuilder",
     "Journal",
     "Manifest",
+    "ManuscriptDrafter",
     "UnsupportedManifestVersion",
     "__version__",
     "load_journal",
