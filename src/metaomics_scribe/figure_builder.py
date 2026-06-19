@@ -1,10 +1,13 @@
 """Figure router.
 
-The upstream pipeline now composes every multi-panel manuscript figure itself
-and lists the resulting TIFFs/PNGs in the manifest's ``panels`` block (schema
-1.3+). The agent's job here is therefore narrow: for each manuscript slot id
-declared by the journal template, look the composite up in the manifest, copy
-the file verbatim to ``runs/<study_id>/figures/<slot_id>.<ext>``, and write a
+The upstream pipeline composes every multi-panel manuscript figure itself and
+emits the resulting TIFFs/PNGs through a dedicated ``panels`` stage. Each
+composite Figure carries ``kind: "panel_composite"`` with the manuscript
+``slot`` id and ``section`` (``main`` / ``supplementary``).
+
+The agent's job here is therefore narrow: for each slot id declared by the
+journal template, look the composite up in the manifest, copy the file
+verbatim to ``runs/<study_id>/figures/<slot_id>.<ext>``, and write a
 ``<slot_id>.caption.txt`` sidecar combining the journal-side title with the
 manifest-side ``caption_seed``.
 
@@ -21,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .journal import Journal
-from .manifest import Manifest, Panel
+from .manifest import Figure, Manifest
 
 
 @dataclass(frozen=True)
@@ -45,10 +48,10 @@ class FigureBuilder:
     def _figures_dir(self) -> Path:
         return self.output_root / self.manifest.study.id / "figures"
 
-    def _find_panel(self, slot_id: str) -> Panel:
-        """Locate the manifest panel for ``slot_id`` or raise a clear error.
+    def _find_panel(self, slot_id: str) -> Figure:
+        """Locate the manifest panel composite for ``slot_id`` or raise.
 
-        The journal's slot list and the manifest's ``panels`` block share the
+        The journal's slot list and the pipeline's ``panels`` stage share the
         same ids by contract — a mismatch usually means the pipeline hasn't
         re-emitted the manifest after a re-run, so the error message points
         the human author at that.
@@ -59,18 +62,13 @@ class FigureBuilder:
 
         panel = self.manifest.find_panel(slot_id)
         if panel is None:
-            available = self._available_panel_ids()
+            available = self.manifest.panel_slot_ids()
             raise RuntimeError(
-                f"slot {slot_id!r} has no entry in manifest `panels` — "
+                f"slot {slot_id!r} has no entry in the manifest `panels` stage — "
                 f"pipeline likely hasn't emitted the composite for it yet "
                 f"(available: {available})"
             )
         return panel
-
-    def _available_panel_ids(self) -> list[str]:
-        if self.manifest.panels is None:
-            return []
-        return [p.id for p in (*self.manifest.panels.main, *self.manifest.panels.supplementary)]
 
     def build(self, slot_id: str) -> BuiltFigure:
         """Route the composite for ``slot_id`` and write the caption sidecar.
@@ -109,7 +107,7 @@ class FigureBuilder:
         )
 
     @staticmethod
-    def _resolve_extension(panel: Panel, src_abs: Path) -> str:
+    def _resolve_extension(panel: Figure, src_abs: Path) -> str:
         """Decide the output extension. Prefer the path suffix; fall back to ``format``."""
         suffix = src_abs.suffix.lstrip(".").lower()
         if suffix:
@@ -117,7 +115,7 @@ class FigureBuilder:
         if panel.format:
             return panel.format.lower()
         raise RuntimeError(
-            f"cannot determine output extension for panel {panel.id!r} — "
+            f"cannot determine output extension for panel {panel.slot!r} — "
             f"path has no suffix and no `format` field"
         )
 

@@ -55,9 +55,12 @@ def _materialise_example(tmp_path: Path) -> Path:
     (manifest_dir / "manifest.json").write_text(json.dumps(data), encoding="utf-8")
 
     palette = [(220, 80, 80), (80, 180, 120), (80, 130, 220), (220, 180, 80)]
-    panels = data.get("panels", {})
-    for i, panel in enumerate((*panels.get("main", []), *panels.get("supplementary", []))):
-        target = tmp_path / panel["path"]
+    panel_figs = [
+        f for f in data.get("stages", {}).get("panels", {}).get("figures", [])
+        if f.get("kind") == "panel_composite"
+    ]
+    for i, fig in enumerate(panel_figs):
+        target = tmp_path / fig["path"]
         _stamp_tiff(target, 1800, 1200, palette[i % len(palette)])
     return manifest_dir / "manifest.json"
 
@@ -143,18 +146,21 @@ def test_build_preserves_png_extension(tmp_path: Path):
     data = json.loads(EXAMPLE_MANIFEST.read_text(encoding="utf-8"))
     manifest_dir = tmp_path / "project" / "run"
     manifest_dir.mkdir(parents=True)
-    # Replace the example's panels with a single PNG-format entry.
+    # Replace the example's panels stage with a single PNG-format composite.
     png_rel = "test_run/Figures/panels/main/fig_demo.png"
-    data["panels"] = {
-        "main": [
+    data["stages"]["panels"] = {
+        "status": "complete",
+        "tables": [],
+        "figures": [
             {
-                "id": "fig_demo",
                 "path": png_rel,
+                "kind": "panel_composite",
                 "format": "png",
+                "section": "main",
+                "slot": "fig_demo",
                 "caption_seed": "Demo PNG",
             }
         ],
-        "supplementary": [],
     }
     (manifest_dir / "manifest.json").write_text(json.dumps(data), encoding="utf-8")
     (tmp_path / png_rel).parent.mkdir(parents=True)
@@ -181,17 +187,17 @@ def test_unknown_slot_raises(example_project: Path, tmp_path: Path):
 
 
 def test_slot_in_journal_but_missing_from_manifest_panels(example_project: Path, tmp_path: Path):
-    """A journal slot that has no `panels` entry in the manifest must raise a
+    """A journal slot that has no composite in the `panels` stage must raise a
     clear error — silent skip would let an empty figure ship to the manuscript."""
     m = load_manifest(example_project)
     j_path = _minimal_journal(
         tmp_path,
-        slot_ids_main=["fig01_taxa_overview", "fig07_sankey_vf"],  # second isn't in example panels
+        slot_ids_main=["fig01_taxa_overview", "fig07_sankey_vf"],  # second isn't emitted
     )
     j = load_journal(j_path)
     fb = FigureBuilder(m, j, output_root=tmp_path / "runs")
 
-    with pytest.raises(RuntimeError, match="no entry in manifest `panels`"):
+    with pytest.raises(RuntimeError, match="no entry in the manifest `panels` stage"):
         fb.build("fig07_sankey_vf")
 
 
@@ -216,9 +222,18 @@ def test_caption_handles_missing_seed(tmp_path: Path):
     manifest_dir = tmp_path / "project" / "run"
     manifest_dir.mkdir(parents=True)
     rel = "test_run/Figures/panels/main/fig_noseed.tiff"
-    data["panels"] = {
-        "main": [{"id": "fig_noseed", "path": rel, "format": "tiff"}],
-        "supplementary": [],
+    data["stages"]["panels"] = {
+        "status": "complete",
+        "tables": [],
+        "figures": [
+            {
+                "path": rel,
+                "kind": "panel_composite",
+                "format": "tiff",
+                "section": "main",
+                "slot": "fig_noseed",
+            }
+        ],
     }
     (manifest_dir / "manifest.json").write_text(json.dumps(data), encoding="utf-8")
     _stamp_tiff(tmp_path / rel, 400, 300, (0, 0, 0))
@@ -233,11 +248,11 @@ def test_caption_handles_missing_seed(tmp_path: Path):
     assert caption.strip()  # not empty
 
 
-def test_manifest_without_panels_block_raises(tmp_path: Path):
-    """An older manifest (no `panels` block) cannot be routed — surface clearly
+def test_manifest_without_panels_stage_raises(tmp_path: Path):
+    """An older manifest (no `panels` stage) cannot be routed — surface clearly
     rather than crashing on attribute access."""
     data = json.loads(EXAMPLE_MANIFEST.read_text(encoding="utf-8"))
-    data.pop("panels", None)
+    data["stages"].pop("panels", None)
     manifest_dir = tmp_path / "project" / "run"
     manifest_dir.mkdir(parents=True)
     (manifest_dir / "manifest.json").write_text(json.dumps(data), encoding="utf-8")
@@ -246,7 +261,7 @@ def test_manifest_without_panels_block_raises(tmp_path: Path):
     fb = FigureBuilder(load_manifest(manifest_dir / "manifest.json"), load_journal(j_path),
                       output_root=tmp_path / "runs")
 
-    with pytest.raises(RuntimeError, match="no entry in manifest `panels`"):
+    with pytest.raises(RuntimeError, match="no entry in the manifest `panels` stage"):
         fb.build("fig01_taxa_overview")
 
 
@@ -285,8 +300,8 @@ def test_real_chicken_batch(tmp_path: Path):
     fb = FigureBuilder(m, j, output_root=tmp_path / "runs")
 
     # Route the first main slot the manifest actually lists.
-    available = fb._available_panel_ids()
-    assert available, "real manifest must include a `panels` block"
+    available = m.panel_slot_ids()
+    assert available, "real manifest must include a `panels` stage"
     target = next((s.id for s in j.figure_slots if s.id in available), None)
     assert target, "no overlap between journal slots and manifest panels"
 

@@ -21,7 +21,7 @@ EXAMPLE = Path(__file__).parent.parent / "examples" / "manifest.example.json"
 
 def test_loads_example_end_to_end():
     m = load_manifest(EXAMPLE)
-    assert m.manifest_version == "1.3"
+    assert m.manifest_version == "1.2"
     assert m.study.id == "chicken_batch2"
     assert m.study.n_samples == 32
     assert m.config.stats.permanova_permutations == 9999
@@ -29,31 +29,43 @@ def test_loads_example_end_to_end():
     assert m.stages["alpha_diversity"].status == "complete"
 
 
-def test_panels_section_loads():
-    """The 1.3 `panels` block exposes main + supplementary composites by slot id."""
+def test_panels_stage_loads():
+    """The 1.2 `panels` stage exposes composites tagged kind=panel_composite + slot + section."""
     m = load_manifest(EXAMPLE)
-    assert m.panels is not None
-    main_ids = [p.id for p in m.panels.main]
-    assert "fig01_taxa_overview" in main_ids
-    supp_ids = [p.id for p in m.panels.supplementary]
-    assert "figS00_heatmap_species" in supp_ids
+    panels_stage = m.stages.get("panels")
+    assert panels_stage is not None
+    composites = [f for f in panels_stage.figures if f.kind == "panel_composite"]
+    slots = {f.slot for f in composites}
+    sections = {f.section for f in composites}
+    assert "fig01_taxa_overview" in slots
+    assert "figS00_heatmap_species" in slots
+    assert sections == {"main", "supplementary"}
 
 
 def test_find_panel_returns_match_and_none():
     m = load_manifest(EXAMPLE)
     hit = m.find_panel("fig01_taxa_overview")
-    assert hit is not None and hit.path.endswith("fig01_taxa_overview.tiff")
+    assert hit is not None
+    assert hit.path.endswith("fig01_taxa_overview.tiff")
+    assert hit.kind == "panel_composite"
     assert m.find_panel("fig99_not_emitted") is None
 
 
-def test_find_panel_returns_none_when_panels_absent(tmp_path: Path):
+def test_find_panel_returns_none_when_stage_absent(tmp_path: Path):
     data = json.loads(EXAMPLE.read_text(encoding="utf-8"))
-    data.pop("panels", None)
+    data["stages"].pop("panels", None)
     out = tmp_path / "manifest.json"
     out.write_text(json.dumps(data), encoding="utf-8")
     m = load_manifest(out)
-    assert m.panels is None
+    assert "panels" not in m.stages
     assert m.find_panel("fig01_taxa_overview") is None
+
+
+def test_panel_slot_ids_in_order():
+    m = load_manifest(EXAMPLE)
+    ids = m.panel_slot_ids()
+    assert ids[0] == "fig01_taxa_overview"
+    assert "figS00_heatmap_species" in ids
 
 
 def test_table_schema_field_alias():

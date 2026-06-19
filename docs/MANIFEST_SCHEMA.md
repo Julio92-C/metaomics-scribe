@@ -13,12 +13,11 @@ The single contract between the upstream metagenomics pipeline and `metaomics-sc
 
 ```jsonc
 {
-  "manifest_version": "1.3",
+  "manifest_version": "1.2",
   "study": { ... },        // describes the experiment
   "config": { ... },       // pipeline configuration snapshot (filters, stats params)
   "outputs": { ... },      // base directories (paths in stages are relative to these)
-  "stages": { ... },       // per-stage per-panel artifact inventory
-  "panels":  { ... },      // (1.3) pre-stitched manuscript composites
+  "stages": { ... },       // per-stage artifact inventory (incl. the `panels` stage)
   "pipeline": { ... }      // pipeline identity + run timing
 }
 ```
@@ -162,55 +161,67 @@ Plain-text artifacts (PERMANOVA, PERMDISP, Kruskal-Wallis output). The agent par
 }
 ```
 
-## `panels` *(1.3)*
+## The `panels` stage *(1.2)*
 
-The pipeline now composes the final multi-panel manuscript figures itself (one
-TIFF/PNG per manuscript figure, with panel labels A/B/C… already baked in).
-The `panels` block surfaces those composites by **slot id**, so the agent can
-route them to manuscript positions without re-stitching per-panel artifacts.
+The pipeline composes the final multi-panel manuscript figures itself (one
+TIFF/PNG per manuscript figure, with panel labels A/B/C… already baked in) and
+emits them as ordinary `figures` entries in a dedicated **`panels`** stage.
+The agent routes each composite into manuscript position by **slot id**,
+without re-stitching per-panel artifacts.
 
 ```jsonc
-"panels": {
-  "main": [
-    {
-      "id":           "fig01_taxa_overview",
-      "path":         "test_run/Figures/panels/main/fig01_taxa_overview.tiff",
-      "format":       "tiff",
-      "caption_seed": "Taxonomic overview across treatment groups: alpha diversity (A), beta diversity (B), composition (C)."
-    },
-    {
-      "id":           "fig02_resistome_overview",
-      "path":         "test_run/Figures/panels/main/fig02_resistome_overview.tiff",
-      "format":       "tiff",
-      "caption_seed": "Resistome overview: drug-class composition (A), ARG totals (B), Venn (C), abundance violin (D), PCoA (E)."
-    }
-  ],
-  "supplementary": [
-    {
-      "id":           "figS00_heatmap_species",
-      "path":         "test_run/Figures/panels/supplementary/figS00_heatmap_species.tiff",
-      "format":       "tiff",
-      "caption_seed": "Per-sample species-level abundance heatmap."
-    }
-  ]
+"stages": {
+  // … taxonomy, alpha_diversity, … (per-panel artifacts for traceability)
+
+  "panels": {
+    "status": "complete",
+    "tables": [
+      // Optional: multi-tab xlsx with one sheet per supplementary table kind.
+      { "path": "test_run/Datasets/panels/supplementary_tables.xlsx",
+        "kind": "supplementary_tables", "format": "xlsx" }
+    ],
+    "figures": [
+      {
+        "path":         "test_run/Figures/panels/main/fig01_taxa_overview.tiff",
+        "kind":         "panel_composite",
+        "format":       "tiff",
+        "section":      "main",
+        "slot":         "fig01_taxa_overview",
+        "caption_seed": "Taxonomic overview: alpha diversity (A), beta diversity (B), composition (C)."
+      },
+      {
+        "path":         "test_run/Figures/panels/supplementary/figS00_heatmap_species.tiff",
+        "kind":         "panel_composite",
+        "format":       "tiff",
+        "section":      "supplementary",
+        "slot":         "figS00_heatmap_species",
+        "caption_seed": "Per-sample species-level abundance heatmap."
+      }
+    ]
+  }
 }
 ```
 
+Each composite Figure adds two optional fields to the normal Figure shape:
+
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `id` | string | yes | Matches the journal slot id (`fig01_taxa_overview`, `figS00c_rarefaction_curves`, …). Determines the output filename `runs/<study_id>/figures/<id>.<ext>`. |
-| `path` | string | yes | Relative to `outputs.project_root`, same rule as stage paths. |
-| `format` | string | no | `tiff`, `tif`, or `png`. Inferred from the path suffix when absent. |
-| `caption_seed` | string | no | Short pipeline-written description. The agent prepends the journal-side `title` and writes the result to `<id>.caption.txt`. |
+| `kind` | string | yes | Always `"panel_composite"` for these entries — distinguishes them from per-panel artifacts emitted by other stages. |
+| `slot` | string | yes (for composites) | Matches the journal slot id (`fig01_taxa_overview`, `figS00c_rarefaction_curves`, …). Determines the output filename `runs/<study_id>/figures/<slot>.<ext>`. |
+| `section` | string | yes (for composites) | `"main"` or `"supplementary"`. The agent uses this to bucket outputs for downstream packaging; routing itself is keyed on `slot`. |
+| `path` | string | yes | Relative to `outputs.project_root`, same rule as every other stage path. |
+| `format` | string | no | Inferred from the path suffix when absent. Use `tiff` for Frontiers; `png` is also accepted. |
+| `caption_seed` | string | no but recommended | Short pipeline-written description (1–2 sentences). The agent prepends the journal-side `title` and writes the result to `<slot>.caption.txt`. |
 
 Slot ids are the contract between pipeline and journal. The journal template
-lists the same ids in manuscript order; the agent looks each one up here. A
-slot id that doesn't appear in either `main` or `supplementary` causes the
-builder to raise — composites are never silently skipped.
+lists the same ids in manuscript order; the agent calls `Manifest.find_panel(slot_id)`
+which scans `stages["panels"].figures` for a `panel_composite` whose `slot`
+matches. A slot id that isn't emitted causes the builder to raise — composites
+are never silently skipped.
 
-The `stages.*.figures` per-panel entries are preserved for traceability (so the
-agent can cite the source of each composite) but are not consumed for manuscript
-figure routing in 1.3+.
+The per-panel `figures` entries on other stages (taxonomy, alpha_diversity, …)
+are preserved for traceability (so the agent can cite the source of each panel
+inside a composite) but are not consumed for manuscript figure routing.
 
 ## `pipeline`
 
@@ -268,6 +279,7 @@ Stable strings the agent uses to route artifacts to manuscript sections. Add new
 | `connectivity_venn_taxa` / `connectivity_venn_genesets` *(1.1)* | network |
 | `network_graph` / `chord` / `sankey` / `degree_distribution` | network |
 | `sankey_png` *(1.1)* | network (PNG render of the HTML sankey, for journal figure use) |
+| `panel_composite` *(1.2)* | the `panels` stage — pre-stitched manuscript composite; pairs with `slot` + `section` fields on Figure |
 
 ### Stats text
 
@@ -286,20 +298,22 @@ Stable strings the agent uses to route artifacts to manuscript sections. Add new
 
 ### Changelog
 
-- **1.3** *(current)*
-  - Added the top-level `panels` block (see `panels` section above). The
-    pipeline now ships pre-stitched multi-panel manuscript composites under
-    `Figures/panels/{main,supplementary}/`; this block surfaces them to the
-    agent by slot id, replacing the per-panel stitching the agent used to do.
-  - The `stages.*.figures` entries remain valid and unchanged — they document
-    every per-panel artifact for traceability — but the figure builder reads
-    `panels` exclusively for manuscript composition in 1.3+.
-- **1.2** *(emitted by pipeline as of 2026-06; superseded by 1.3 for figure routing)*
-  - Bundled the literature-driven `kind` additions tracked in
-    `docs/PIPELINE_V2_GAPS.md` (`rarefaction_curves`, `genus_heatmap`,
+- **1.2** *(current — emitted by pipeline as of 2026-06)*
+  - Added the `panels` stage convention (see "The `panels` stage" section
+    above). The pipeline now ships pre-stitched multi-panel manuscript
+    composites under `Figures/panels/{main,supplementary}/` and surfaces them
+    through a dedicated `panels` stage. Each composite is a normal `Figure`
+    with `kind: "panel_composite"`, plus two new optional fields — `slot`
+    (manuscript slot id) and `section` (`"main"` or `"supplementary"`). The
+    agent looks up each slot via `Manifest.find_panel(slot_id)` and routes
+    the file into manuscript position; no per-panel stitching anymore.
+  - Bundled the literature-driven `kind` additions previously tracked in the
+    deleted `docs/PIPELINE_V2_GAPS.md` (`rarefaction_curves`, `genus_heatmap`,
     `aldex2_maplot`/`aldex2_dotplot`, `arg_upset`, `arg_circos`,
     `vf_arg_corr_heatmap`, `mantel_triangle`, `sankey_taxon_arg_mge`,
-    `mobile_fraction_bar`, plus the 1.1 carry-forwards).
+    `mobile_fraction_bar`, plus the 1.1 carry-forwards). These remain useful
+    for traceability and supplementary-table generation, but routing is
+    keyed on the `panels`-stage composites, not on these.
   - Pure additive on top of 1.1 — no field renames or removals.
 - **1.1** *(proposed; pipeline-side emission TBD)*
   - Loosened `pipeline.run_started_at` / `run_finished_at` to allow `null` when

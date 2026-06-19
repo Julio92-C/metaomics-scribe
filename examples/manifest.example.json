@@ -1,5 +1,5 @@
 {
-  "manifest_version": "1.3",
+  "manifest_version": "1.2",
   "study": {
     "id": "chicken_batch2",
     "name": "Chicken caecum microbiome — Dulse vs Control, weeks 4 and 5",
@@ -290,31 +290,39 @@
           "caption_seed": "Co-occurrence network of the top-50 hubs; nodes coloured by Louvain module, edge weight by SparCC correlation."
         }
       ]
+    },
+
+    "panels": {
+      "status": "complete",
+      "duration_s": 12.4,
+      "tables": [],
+      "figures": [
+        {
+          "path":         "test_run/Figures/panels/main/fig01_taxa_overview.tiff",
+          "kind":         "panel_composite",
+          "format":       "tiff",
+          "section":      "main",
+          "slot":         "fig01_taxa_overview",
+          "caption_seed": "Taxonomic overview across Treatment x Time groups: alpha diversity (A), beta diversity (B), composition (C)."
+        },
+        {
+          "path":         "test_run/Figures/panels/main/fig05_relative_abundance_species.tiff",
+          "kind":         "panel_composite",
+          "format":       "tiff",
+          "section":      "main",
+          "slot":         "fig05_relative_abundance_species",
+          "caption_seed": "Stacked-bar composition of the top-50 species per sample."
+        },
+        {
+          "path":         "test_run/Figures/panels/supplementary/figS00_heatmap_species.tiff",
+          "kind":         "panel_composite",
+          "format":       "tiff",
+          "section":      "supplementary",
+          "slot":         "figS00_heatmap_species",
+          "caption_seed": "Per-sample species-level abundance heatmap."
+        }
+      ]
     }
-  },
-  "panels": {
-    "main": [
-      {
-        "id":           "fig01_taxa_overview",
-        "path":         "test_run/Figures/panels/main/fig01_taxa_overview.tiff",
-        "format":       "tiff",
-        "caption_seed": "Taxonomic overview across Treatment x Time groups: alpha diversity (A), beta diversity (B), composition (C)."
-      },
-      {
-        "id":           "fig05_relative_abundance_species",
-        "path":         "test_run/Figures/panels/main/fig05_relative_abundance_species.tiff",
-        "format":       "tiff",
-        "caption_seed": "Stacked-bar composition of the top-50 species per sample, faceted by Treatment x Time group."
-      }
-    ],
-    "supplementary": [
-      {
-        "id":           "figS00_heatmap_species",
-        "path":         "test_run/Figures/panels/supplementary/figS00_heatmap_species.tiff",
-        "format":       "tiff",
-        "caption_seed": "Per-sample species-level abundance heatmap."
-      }
-    ]
   },
   "pipeline": {
     "name":            "Metagenomics_pipeline_automation",

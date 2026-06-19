@@ -93,6 +93,11 @@ class Figure(_Model):
     pair: list[str] | None = None
     domain: str | None = None
     group: str | None = None
+    # Pre-stitched manuscript composites (kind="panel_composite") emitted by
+    # the `panels` stage carry these two fields to identify which manuscript
+    # slot they fill and which section (main / supplementary) they belong to.
+    slot: str | None = None
+    section: str | None = None
 
 
 class StatsText(_Model):
@@ -118,24 +123,8 @@ class Pipeline(_Model):
     run_finished_at: datetime | None = None
 
 
-class Panel(_Model):
-    """A pre-stitched manuscript composite figure emitted by the pipeline.
-
-    Introduced in manifest schema 1.3. `id` is the slot id shared with the
-    journal template (e.g. `fig01_taxa_overview`, `figS00c_rarefaction_curves`).
-    """
-
-    id: str
-    path: str
-    format: str | None = None
-    caption_seed: str | None = None
-
-
-class Panels(_Model):
-    """Container for manuscript-ordered main + supplementary composites."""
-
-    main: list[Panel] = []
-    supplementary: list[Panel] = []
+PANELS_STAGE = "panels"
+PANEL_COMPOSITE_KIND = "panel_composite"
 
 
 class Manifest(_Model):
@@ -144,24 +133,36 @@ class Manifest(_Model):
     config: Config
     outputs: Outputs
     stages: dict[str, Stage]
-    panels: Panels | None = None
     pipeline: Pipeline
 
     _manifest_dir: Path | None = PrivateAttr(default=None)
 
-    def find_panel(self, slot_id: str) -> Panel | None:
-        """Return the panel composite with the given slot id, or ``None``.
+    def find_panel(self, slot_id: str) -> Figure | None:
+        """Return the panel composite Figure for ``slot_id``, or ``None``.
 
-        Searches `panels.main` first, then `panels.supplementary`. Returns
-        ``None`` when the slot id isn't listed or `panels` is absent — callers
-        decide whether that's a hard error.
+        Iterates the ``panels`` stage's figures (``kind == "panel_composite"``)
+        and matches on the ``slot`` field. Returns ``None`` when the slot id
+        isn't emitted or the `panels` stage is absent — callers decide whether
+        that's a hard error.
         """
-        if self.panels is None:
+        stage = self.stages.get(PANELS_STAGE)
+        if stage is None:
             return None
-        for p in (*self.panels.main, *self.panels.supplementary):
-            if p.id == slot_id:
-                return p
+        for fig in stage.figures:
+            if fig.kind == PANEL_COMPOSITE_KIND and fig.slot == slot_id:
+                return fig
         return None
+
+    def panel_slot_ids(self) -> list[str]:
+        """Return all panel slot ids emitted by the `panels` stage, in order."""
+        stage = self.stages.get(PANELS_STAGE)
+        if stage is None:
+            return []
+        return [
+            fig.slot
+            for fig in stage.figures
+            if fig.kind == PANEL_COMPOSITE_KIND and fig.slot is not None
+        ]
 
     @property
     def manifest_dir(self) -> Path:
