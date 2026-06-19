@@ -8,6 +8,7 @@ from metaomics_scribe.manifest import (
     load_manifest,
 )
 from metaomics_scribe.manuscript import DraftedManuscript, ManuscriptDrafter
+from metaomics_scribe.methodology import Methodology, load_methodology
 
 __version__ = "0.0.0"
 
@@ -19,8 +20,10 @@ __all__ = [
     "Journal",
     "Manifest",
     "ManuscriptDrafter",
+    "Methodology",
     "UnsupportedManifestVersion",
     "__version__",
     "load_journal",
     "load_manifest",
+    "load_methodology",
 ]

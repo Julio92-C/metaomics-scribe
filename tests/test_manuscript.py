@@ -13,10 +13,12 @@ import pytest
 from metaomics_scribe.journal import load_journal
 from metaomics_scribe.manifest import load_manifest
 from metaomics_scribe.manuscript import ManuscriptDrafter
+from metaomics_scribe.methodology import load_methodology
 
 REPO = Path(__file__).parent.parent
 EXAMPLE_MANIFEST = REPO / "examples" / "manifest.example.json"
 FRONTIERS_JOURNAL = REPO / "journals" / "frontiers_microbiome.yaml"
+PIPELINE_METHODOLOGY = REPO / "methods" / "metagenomics_pipeline_automation.yaml"
 
 
 @pytest.fixture
@@ -172,6 +174,55 @@ def test_unsupported_section_renders_stub(example_manifest: Path, tmp_path: Path
 # ---------------------------------------------------------------------------
 # DOCX export
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# methodology integration
+# ---------------------------------------------------------------------------
+
+
+def test_methodology_yaml_loads_and_covers_canonical_stages():
+    """Shipped methodology covers every stage the example manifest declares."""
+    m = load_manifest(EXAMPLE_MANIFEST)
+    meth = load_methodology(PIPELINE_METHODOLOGY)
+    complete = [name for name, s in m.stages.items() if s.status == "complete"]
+    # 'panels' is in the manifest but not a methods-prose stage we care about
+    # here; everything else with status=complete should have prose.
+    missing = [name for name in complete if meth.for_stage(name) is None]
+    assert not missing, f"methodology missing prose for completed stages: {missing}"
+
+
+def test_methodology_renders_per_stage_paragraphs(example_manifest: Path, tmp_path: Path):
+    """When a methodology is provided, the Bioinformatic Pipeline subsection
+    gains one bold-lead-in paragraph per completed stage, in manifest order."""
+    m = load_manifest(example_manifest)
+    j = load_journal(FRONTIERS_JOURNAL)
+    meth = load_methodology(PIPELINE_METHODOLOGY)
+    drafter = ManuscriptDrafter(m, j, output_root=tmp_path / "runs", methodology=meth)
+    text = drafter.draft().markdown_path.read_text(encoding="utf-8")
+
+    # Each completed stage's title appears as a bold lead-in.
+    for stage_name, stage in m.stages.items():
+        if stage.status != "complete":
+            continue
+        entry = meth.for_stage(stage_name)
+        if entry is None:
+            continue
+        assert f"**{entry.title}.**" in text, (
+            f"missing methodology paragraph for stage {stage_name!r}"
+        )
+
+
+def test_methodology_optional_falls_back_cleanly(example_manifest: Path, tmp_path: Path):
+    """Without a methodology, the generic Bioinformatic Pipeline paragraph
+    still ships — nothing crashes."""
+    m = load_manifest(example_manifest)
+    j = load_journal(FRONTIERS_JOURNAL)
+    drafter = ManuscriptDrafter(m, j, output_root=tmp_path / "runs", methodology=None)
+    text = drafter.draft().markdown_path.read_text(encoding="utf-8")
+    assert "### Bioinformatic Pipeline" in text
+    # No methodology means no bold-lead-in paragraphs.
+    assert "**Taxonomic profiling.**" not in text
 
 
 @pytest.mark.skipif(shutil.which("pandoc") is None, reason="pandoc not on PATH")

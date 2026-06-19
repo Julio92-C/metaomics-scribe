@@ -24,6 +24,7 @@ from pathlib import Path
 
 from .journal import Journal, Section
 from .manifest import Manifest
+from .methodology import Methodology
 
 
 @dataclass(frozen=True)
@@ -37,10 +38,17 @@ class DraftedManuscript:
 class ManuscriptDrafter:
     """Render a manuscript draft from a manifest + journal template."""
 
-    def __init__(self, manifest: Manifest, journal: Journal, output_root: str | Path = "runs"):
+    def __init__(
+        self,
+        manifest: Manifest,
+        journal: Journal,
+        output_root: str | Path = "runs",
+        methodology: Methodology | None = None,
+    ):
         self.manifest = manifest
         self.journal = journal
         self.output_root = Path(output_root)
+        self.methodology = methodology
 
     def _manuscript_dir(self) -> Path:
         return self.output_root / self.manifest.study.id
@@ -227,11 +235,29 @@ class ManuscriptDrafter:
         # date/time integers into the prose that the no-invented-numbers
         # guardrail can't tell apart from real measurements. Provenance lives
         # in the pipeline version + repo URL.
-        bioinformatic = (
-            f"### Bioinformatic Pipeline\n\n"
+        bioinformatic_lines = [
+            "### Bioinformatic Pipeline",
+            "",
             f"Sequencing reads were processed using **{p.name}** "
-            f"(version `{p.version}`; {p.repo}).{complete_clause}\n"
-        )
+            f"(version `{p.version}`; {p.repo}).{complete_clause}",
+        ]
+        if self.methodology is not None:
+            bioinformatic_lines += [
+                "",
+                self.methodology.pipeline.overview.strip(),
+            ]
+            # One bold-lead-in paragraph per completed stage, in manifest
+            # iteration order so the prose follows the same order the
+            # pipeline declares its stages.
+            for stage_name in complete:
+                entry = self.methodology.for_stage(stage_name)
+                if entry is None:
+                    continue
+                bioinformatic_lines += [
+                    "",
+                    f"**{entry.title}.** {entry.prose.strip()}",
+                ]
+        bioinformatic = "\n".join(bioinformatic_lines) + "\n"
 
         # Statistical analysis — filters, ALDEx2 settings, PERMANOVA, alpha.
         statistical = (

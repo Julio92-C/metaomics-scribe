@@ -1,0 +1,144 @@
+# Methodology template for the Metagenomics_pipeline_automation R workflow.
+#
+# Lifted verbatim from §2 ("Implementation") of the upstream pipeline's
+# applications note: Metagenomics_pipeline_automation/docs/manuscript/
+# applications_note.md (as of 2026-06-19).
+#
+# The ManuscriptDrafter loads this file and, for each manifest stage with
+# status == "complete", appends a bold-lead-in paragraph under the
+# "Bioinformatic Pipeline" subsection of Methods. Stages that ran but have
+# no entry here fall through to a generic one-line mention.
+#
+# Stage ids must match the keys in `manifest.stages` (taxonomy,
+# relative_abundance, alpha_diversity, ... etc.).
+
+methodology:
+  id:           metagenomics_pipeline_automation
+  source:       Metagenomics_pipeline_automation/docs/manuscript/applications_note.md
+  source_date:  "2026-06-19"
+
+pipeline:
+  overview: >
+    The workflow is a stand-alone R project parameterised by a single YAML
+    configuration file per study; module code is not edited per-project. A
+    single entry point (`run_pipeline.R`) consumes the configuration and
+    dispatches to fifteen ordered modules (`R/00_setup.R` through
+    `R/14_panels.R`), and every run emits a kind-tagged `manifest.json`
+    (contract v1.2) cataloguing every figure and table produced.
+
+stages:
+
+  load_inputs:
+    title: "Input ingest"
+    prose: >
+      Upstream tables — Kraken2/Bracken classifications, ABRicate hits,
+      Re-centrifuge contamination tags and study metadata — were loaded,
+      accommodating per-project input shapes rather than assuming a fixed
+      column layout.
+
+  clean_data:
+    title: "Decontamination and metadata merge"
+    prose: >
+      Negative-control subtraction was applied when declared, Bracken counts
+      were merged with the metadata covariates configured as fixed effects
+      or random effect, and ABRicate calls were linked to taxonomic
+      assignments. Per-study NCBI taxonomy fixes were applied from a
+      structured `taxid_fixes.csv` rather than as row-index edits.
+
+  normalisation:
+    title: "Gene-element TPM normalisation"
+    prose: >
+      Per-(sample, GENE) transcripts-per-million (TPM) values were computed
+      from ABRicate hits and gene lengths to provide a length-normalised
+      abundance metric for all downstream gene-element analyses.
+
+  taxonomy:
+    title: "Taxonomic profiling"
+    prose: >
+      Bracken counts derived from Kraken2 taxonomic assignment were
+      summarised with Venn diagrams and annotated heatmaps after a shared
+      taxa-name cleanup.
+
+  relative_abundance:
+    title: "Relative abundance"
+    prose: >
+      Top-N stacked-bar relative-abundance plots were produced for each
+      sample alongside paired total-count and sample-prevalence panels.
+      Static PNG and interactive plotly HTML renderings are both retained.
+
+  alpha_diversity:
+    title: "Alpha diversity"
+    prose: >
+      Alpha diversity was reported for Shannon, Simpson, richness, Pielou's
+      evenness and Fisher's alpha. Per-metric Kruskal-Wallis tests were
+      applied across treatment groups and visualised as violin and bar
+      plots. Where a pre-computed indices CSV was available (e.g. Oxford
+      Nanopore wf-metagenomics output) it was preferred, falling back to
+      the vegan package otherwise.
+
+  beta_diversity:
+    title: "Beta diversity"
+    prose: >
+      Beta-diversity ordination used principal-coordinates analysis (PCoA)
+      on Hellinger-transformed Bray-Curtis distances. PERMANOVA was run
+      with vegan's `adonis2` using 9999 permutations and homogeneity of
+      dispersion was tested with PERMDISP (`betadisper`), both overlaid on
+      the ordination.
+
+  differential_abundance:
+    title: "Differential abundance"
+    prose: >
+      Differential-abundance analysis was performed at two levels — taxa
+      (Bracken counts) and gene elements (ABRicate contig hits per (sample,
+      GENE)) — using ALDEx2 with the Monte-Carlo sample count and
+      Benjamini-Hochberg multiple-testing correction declared in the study
+      configuration. An omnibus Kruskal-Wallis test was combined with
+      pairwise Welch's t tests; covariate-adjusted models are optionally
+      supported via an `aldex.glm` design path.
+
+  resistome:
+    title: "Resistome (ARG) profiling"
+    prose: >
+      The resistome was profiled with ABRicate against the CARD database.
+      Drug-class classification was applied to each antimicrobial-resistance
+      gene (ARG) hit, with a macrolide-lincosamide-streptogramin rollup
+      applied to harmonise overlapping class assignments. Per-domain alpha
+      diversity, gene- and drug-class-level heatmaps, relative-abundance
+      and total-count panels and a PCoA + PERMANOVA + PERMDISP suite were
+      emitted.
+
+  virulome:
+    title: "Virulome (VF) profiling"
+    prose: >
+      Virulence factors were profiled with ABRicate against VFDB; functional
+      categories were extracted from the ABRicate `PRODUCT` field. Output
+      panels mirror the resistome suite (alpha diversity, gene- and
+      function-level heatmaps, relative-abundance and total-count panels,
+      PCoA + PERMANOVA + PERMDISP).
+
+  mobilome:
+    title: "Mobilome profiling"
+    prose: >
+      The mobilome (plasmid replicons and other mobile genetic elements)
+      was profiled with ABRicate against PlasmidFinder. A configurable
+      replicon-family classification (Col-like, IncF, IncX, other Inc) was
+      applied to each hit, with the same diversity, composition and
+      ordination outputs as the resistome and virulome stages.
+
+  network:
+    title: "Integrative network analysis"
+    prose: >
+      A tripartite ggraph network of sample × taxon × gene element was
+      assembled together with chord diagrams (overall and per treatment
+      group) and four-tier networkD3 Sankey diagrams. Gephi-compatible
+      node/edge tables were exported and igraph topology metrics — degree,
+      betweenness, Louvain modularity — plus Bray-Curtis sample clusters
+      were reported.
+
+  panels:
+    title: "Publication panels"
+    prose: >
+      Main and supplementary multi-panel composite figures were assembled
+      from per-stage outputs, driven by a Frontiers slot YAML, with PNG and
+      TIFF renderings independently toggleable. A multi-tab
+      `supplementary_tables.xlsx` was produced in parallel.
