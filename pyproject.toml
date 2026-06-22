@@ -29,6 +29,14 @@ dependencies = [
     "pyyaml>=6.0",
 ]
 
+[project.optional-dependencies]
+llm = [
+    "claude-agent-sdk>=0.1.0",
+]
+
+[project.scripts]
+metaomics-scribe = "metaomics_scribe.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/Julio92-C/metaomics-scribe"
 Repository = "https://github.com/Julio92-C/metaomics-scribe"
@@ -49,7 +57,13 @@ packages = ["src/metaomics_scribe"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["-ra", "--strict-markers"]
+# Deselect live_api by default — those tests call out to Claude via the
+# Claude Agent SDK, which is slow and depends on the user's logged-in CLI.
+# Opt in with `uv run pytest -m live_api`.
+addopts = ["-ra", "--strict-markers", "-m", "not live_api"]
+markers = [
+    "live_api: hits the real Claude Agent SDK (subscription auth via local `claude` CLI). Opt in via `-m live_api`.",
+]
 
 [tool.ruff]
 line-length = 100

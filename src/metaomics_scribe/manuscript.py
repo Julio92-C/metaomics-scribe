@@ -23,8 +23,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .journal import Journal, Section
-from .manifest import Manifest
+from .llm import (
+    DEFAULT_MODEL,
+    LLMCaller,
+    default_caller,
+    draft_results_section,
+)
+from .manifest import Figure, Manifest
 from .methodology import Methodology
+from .stats_extractor import extract_stats
 
 
 @dataclass(frozen=True)
@@ -49,6 +56,11 @@ class ManuscriptDrafter:
         self.journal = journal
         self.output_root = Path(output_root)
         self.methodology = methodology
+        # When non-None, results subsections render LLM-generated prose for
+        # this run instead of the v0.4.0 stub. Set transiently by
+        # draft_with_llm() so the dispatcher in _render_results_stub can
+        # reach it; not part of the public surface.
+        self._llm_prose: dict[str, str] | None = None
 
     def _manuscript_dir(self) -> Path:
         return self.output_root / self.manifest.study.id
@@ -70,6 +82,56 @@ class ManuscriptDrafter:
         markdown_path = out_dir / "manuscript.md"
         markdown_path.write_text("\n".join(chunks) + "\n", encoding="utf-8")
         return DraftedManuscript(markdown_path=markdown_path)
+
+    def draft_with_llm(
+        self,
+        caller: LLMCaller | None = None,
+        *,
+        model: str = DEFAULT_MODEL,
+    ) -> DraftedManuscript:
+        """Draft the manuscript with LLM-generated Results subsections.
+
+        Calls Claude once per results subsection declared in the journal.
+        The deterministic Methods section is unchanged from :meth:`draft`.
+        Each LLM-generated paragraph is validated against the grounding pack
+        (parsed stats + manifest fields); a numeric token in the prose that
+        isn't in the grounding raises
+        :class:`metaomics_scribe.llm.ResultsGuardrailError` and aborts the
+        draft so a fabricated number never reaches disk.
+
+        ``caller`` is any ``(system, user, model) -> str`` callable.
+        Production code can omit it — the default uses the Claude Agent SDK,
+        which authenticates through the local ``claude`` CLI (subscription
+        auth, no API key required). Tests pass a lambda.
+        """
+        if caller is None:
+            caller = default_caller()
+
+        results_section = self._find_results_section()
+        prose: dict[str, str] = {}
+        if results_section is not None and results_section.subsections:
+            stats_bundle = extract_stats(self.manifest)
+            grouped = self._composites_by_subsection()
+            for sub in results_section.subsections:
+                composites = grouped.get(sub.id, [])
+                if not composites:
+                    # Nothing to write about — leave the v0.4.0 "no composite"
+                    # stub in place so the human author sees the gap.
+                    continue
+                prose[sub.id] = draft_results_section(
+                    caller,
+                    manifest=self.manifest,
+                    stats_bundle=stats_bundle,
+                    subsection=sub,
+                    composites=composites,
+                    model=model,
+                )
+
+        self._llm_prose = prose
+        try:
+            return self.draft()
+        finally:
+            self._llm_prose = None
 
     def draft_docx(self, reference_doc: Path | None = None) -> DraftedManuscript:
         """Render the draft and convert it to DOCX via pandoc.
@@ -156,7 +218,11 @@ class ManuscriptDrafter:
                     f"> TODO: no `panel_composite` carries `subsection: {sub.id}` in the manifest."
                 )
             lines.append("")
-            lines.append(f"> TODO: prose for {sub.id} not yet drafted by v0.4.0.")
+            llm_prose = (self._llm_prose or {}).get(sub.id)
+            if llm_prose:
+                lines.append(llm_prose.strip())
+            else:
+                lines.append(f"> TODO: prose for {sub.id} not yet drafted by v0.4.0.")
             lines.append("")
 
         unassigned = groups.get(None, [])
@@ -295,6 +361,19 @@ class ManuscriptDrafter:
         if stage is None:
             return []
         return [f for f in stage.figures if f.kind == "panel_composite"]
+
+    def _find_results_section(self) -> Section | None:
+        for section in self.journal.manuscript.sections:
+            if section.id == "results":
+                return section
+        return None
+
+    def _composites_by_subsection(self) -> dict[str, list[Figure]]:
+        grouped: dict[str, list[Figure]] = {}
+        for fig in self._panel_composites():
+            if fig.subsection:
+                grouped.setdefault(fig.subsection, []).append(fig)
+        return grouped
 
     @staticmethod
     def _human_heading(slug: str) -> str:
