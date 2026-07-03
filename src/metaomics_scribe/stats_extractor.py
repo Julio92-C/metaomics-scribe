@@ -14,12 +14,14 @@ under ``StageStats.raw_text``) so a single malformed file never blocks a draft.
 
 from __future__ import annotations
 
+import csv
 import re
+from io import StringIO
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from .manifest import Manifest, StatsText
+from .manifest import Manifest, StatsText, Table
 
 
 class _Model(BaseModel):
@@ -71,6 +73,25 @@ class PermdispResult(_Model):
     group_mean_distances: dict[str, float] = {}
 
 
+class MantelPair(_Model):
+    """One pairwise Mantel-test row from ``mantel_pairwise_padj.csv``.
+
+    The network stage exports cross-domain coupling as a CSV rather than a
+    ``.txt`` file — the columns are ``domain_a``, ``domain_b``, ``mantel_r``,
+    ``p_raw``, ``p_adj``, ``method``. ``source`` mirrors the convention used
+    for PERMANOVA/PERMDISP: the file stem so the LLM can disambiguate if a
+    stage ever declares multiple Mantel tables (e.g. per distance metric).
+    """
+
+    source: str
+    domain_a: str
+    domain_b: str
+    mantel_r: float
+    p_raw: float
+    p_adj: float
+    method: str = "BH"
+
+
 class StageStats(_Model):
     """Every parsed stats artifact for a single manifest stage.
 
@@ -84,6 +105,7 @@ class StageStats(_Model):
     kruskal: list[KruskalRow] = []
     permanovas: list[PermanovaResult] = []
     permdisps: list[PermdispResult] = []
+    mantels: list[MantelPair] = []
     # Unparsed fallback: kind → raw text. Used for grounding the LLM when we
     # recognise a stats file but don't have a structured parser for it yet.
     raw_text: dict[str, str] = {}
@@ -186,6 +208,39 @@ def _parse_permanova(text: str, source: str) -> PermanovaResult | None:
     return result if matched else None
 
 
+def _parse_mantel_pairwise(text: str, source: str) -> list[MantelPair]:
+    """Parse a Mantel pairwise-comparison CSV emitted by the ``network`` stage.
+
+    Expected columns (case-sensitive): ``domain_a``, ``domain_b``, ``mantel_r``,
+    ``p_raw``, ``p_adj``, ``method``. Rows with missing / unparseable numeric
+    fields are skipped rather than raising, matching the fault tolerance of
+    the ``.txt`` parsers above — one malformed row never blocks a draft.
+    """
+    rows: list[MantelPair] = []
+    reader = csv.DictReader(StringIO(text))
+    if reader.fieldnames is None:
+        return rows
+    required = {"domain_a", "domain_b", "mantel_r", "p_raw", "p_adj"}
+    if not required.issubset(reader.fieldnames):
+        return rows
+    for row in reader:
+        try:
+            rows.append(
+                MantelPair(
+                    source=source,
+                    domain_a=row["domain_a"].strip(),
+                    domain_b=row["domain_b"].strip(),
+                    mantel_r=float(row["mantel_r"]),
+                    p_raw=float(row["p_raw"]),
+                    p_adj=float(row["p_adj"]),
+                    method=(row.get("method") or "BH").strip() or "BH",
+                )
+            )
+        except (KeyError, ValueError, TypeError):
+            continue
+    return rows
+
+
 def _parse_permdisp(text: str, source: str) -> PermdispResult | None:
     result = PermdispResult(source=source)
     in_mean_distances = False
@@ -224,7 +279,13 @@ def _parse_permdisp(text: str, source: str) -> PermdispResult | None:
 # ---------------------------------------------------------------------------
 
 
-def _read_stats_file(manifest: Manifest, entry: StatsText) -> str | None:
+def _read_stats_file(manifest: Manifest, entry: StatsText | Table) -> str | None:
+    """Read the on-disk text of a stats artifact (``.txt`` or ``.csv``).
+
+    The single accessor is shared across the ``.txt`` parsers (Kruskal-Wallis,
+    PERMANOVA, PERMDISP) and the CSV parsers (Mantel) — both entry types
+    expose a ``.path`` attribute, so the function is agnostic to file format.
+    """
     try:
         path = manifest.resolve_path(entry.path)
     except RuntimeError:
@@ -239,8 +300,8 @@ def _read_stats_file(manifest: Manifest, entry: StatsText) -> str | None:
         return None
 
 
-def _stats_source_id(entry: StatsText) -> str:
-    """Stable, human-readable id for a stats_text source.
+def _stats_source_id(entry: StatsText | Table) -> str:
+    """Stable, human-readable id for a stats source (``.txt`` or ``.csv``).
 
     Used by the LLM grounding pack to disambiguate multiple files of the same
     ``kind`` (e.g. ``permanova`` for Bray-Curtis vs ``jaccard_permanova`` for
@@ -265,7 +326,7 @@ def extract_stats(manifest: Manifest) -> StatsBundle:
     """
     bundle = StatsBundle()
     for stage_id, stage in manifest.stages.items():
-        if not stage.stats_text:
+        if not stage.stats_text and not stage.tables:
             continue
         stage_stats = StageStats(stage_id=stage_id)
         any_parsed = False
@@ -296,6 +357,22 @@ def extract_stats(manifest: Manifest) -> StatsBundle:
                 # reference it via the grounding pack. Key by source id so two
                 # files of the same unknown kind don't clobber each other.
                 stage_stats.raw_text[source] = text
+                any_parsed = True
+        # CSV-shaped stats live in `tables` rather than `stats_text`. Only
+        # recognised kinds are ingested here; other tables (composition
+        # long-form, sankey/chord source data, etc.) remain outside the
+        # structured stats bundle and are consumed by the figure builder /
+        # LLM grounding pack via the manifest's `stage_summaries` instead.
+        for entry in stage.tables:
+            if entry.kind != "mantel_pairwise_padj":
+                continue
+            text = _read_stats_file(manifest, entry)
+            if text is None:
+                continue
+            source = _stats_source_id(entry)
+            pairs = _parse_mantel_pairwise(text, source=source)
+            if pairs:
+                stage_stats.mantels.extend(pairs)
                 any_parsed = True
         if any_parsed:
             bundle.by_stage[stage_id] = stage_stats

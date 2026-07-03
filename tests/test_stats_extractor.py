@@ -16,6 +16,7 @@ import pytest
 from metaomics_scribe.manifest import load_manifest
 from metaomics_scribe.stats_extractor import (
     _parse_kruskal,
+    _parse_mantel_pairwise,
     _parse_permanova,
     _parse_permdisp,
     extract_stats,
@@ -224,3 +225,103 @@ def test_extract_stats_skips_stages_with_missing_files(tmp_path: Path):
     bundle = extract_stats(m)
     # Nothing on disk → nothing in the bundle.
     assert bundle.by_stage == {}
+
+
+# ---------------------------------------------------------------------------
+# Mantel CSV parser tests (F6 — network stage cross-domain coupling)
+# ---------------------------------------------------------------------------
+
+
+MANTEL_PAIRWISE_CSV = """\
+domain_a,domain_b,mantel_r,p_raw,p_adj,method
+Taxonomy,Resistome,-0.0629,0.6621,0.7525,BH
+Taxonomy,Virulome,-0.0852,0.7525,0.7525,BH
+Resistome,Virulome,0.1897,0.0928,0.2784,BH
+Taxonomy,Mobilome,0.0361,0.3606,0.638,BH
+Resistome,Mobilome,0.3095,0.0268,0.1608,BH
+Virulome,Mobilome,0.0164,0.4253,0.638,BH
+"""
+
+
+def test_parse_mantel_pairwise_extracts_every_row():
+    rows = _parse_mantel_pairwise(MANTEL_PAIRWISE_CSV, source="mantel_pairwise_padj")
+    assert len(rows) == 6
+    r_v = next(r for r in rows if r.domain_a == "Resistome" and r.domain_b == "Virulome")
+    assert r_v.mantel_r == 0.1897
+    assert r_v.p_raw == 0.0928
+    assert r_v.p_adj == 0.2784
+    assert r_v.method == "BH"
+    assert r_v.source == "mantel_pairwise_padj"
+
+
+def test_parse_mantel_pairwise_returns_empty_for_wrong_schema():
+    """A CSV missing the required columns is skipped rather than raising."""
+    bad = "col_a,col_b,value\nX,Y,0.5\n"
+    assert _parse_mantel_pairwise(bad, source="mantel_pairwise_padj") == []
+
+
+def test_parse_mantel_pairwise_skips_malformed_rows():
+    """One garbage row shouldn't drop the valid rows around it."""
+    text = (
+        "domain_a,domain_b,mantel_r,p_raw,p_adj,method\n"
+        "Taxonomy,Resistome,not-a-float,0.5,0.5,BH\n"
+        "Taxonomy,Virulome,-0.0852,0.7525,0.7525,BH\n"
+    )
+    rows = _parse_mantel_pairwise(text, source="mantel_pairwise_padj")
+    assert len(rows) == 1
+    assert rows[0].domain_b == "Virulome"
+
+
+def test_extract_stats_populates_network_mantels(tmp_path: Path):
+    """Regression: mantel_pairwise_padj.csv lives in stage.tables (not
+    stats_text) because it's CSV-shaped, so the extractor must walk both
+    lists. Previously the LLM had to say "interpreted qualitatively from
+    the figure" because these values were invisible; now they're structured."""
+    data = json.loads(EXAMPLE_MANIFEST.read_text(encoding="utf-8"))
+    # Inject a `network` stage carrying only the mantel_pairwise_padj table.
+    data["stages"]["network"] = {
+        "status": "complete",
+        "tables": [
+            {
+                "path": "test_run/Datasets/network/mantel_pairwise_padj.csv",
+                "kind": "mantel_pairwise_padj",
+                "format": "csv",
+                "schema": {
+                    "domain_a": "string",
+                    "domain_b": "string",
+                    "mantel_r": "double",
+                    "p_raw": "double",
+                    "p_adj": "double",
+                    "method": "string",
+                },
+                "description": "Pairwise Mantel r and adjusted p between omics layers.",
+            }
+        ],
+        "figures": [],
+        "stats_text": [],
+    }
+    manifest_dir = tmp_path / "project" / "run"
+    manifest_dir.mkdir(parents=True)
+    (manifest_dir / "manifest.json").write_text(json.dumps(data), encoding="utf-8")
+
+    project_root = manifest_dir / data["outputs"]["project_root"]
+    mantel_path = (
+        project_root / "test_run" / "Datasets" / "network" / "mantel_pairwise_padj.csv"
+    )
+    mantel_path.parent.mkdir(parents=True, exist_ok=True)
+    mantel_path.write_text(MANTEL_PAIRWISE_CSV, encoding="utf-8")
+
+    bundle = extract_stats(load_manifest(manifest_dir / "manifest.json"))
+    assert "network" in bundle.by_stage
+    network = bundle.by_stage["network"]
+    assert len(network.mantels) == 6
+    sources = {m.source for m in network.mantels}
+    assert sources == {"mantel_pairwise_padj"}
+    # The Resistome-Mobilome pair carries the strongest raw signal and should
+    # round-trip verbatim so the LLM guardrail can quote it later.
+    res_mob = next(
+        m for m in network.mantels if m.domain_a == "Resistome" and m.domain_b == "Mobilome"
+    )
+    assert res_mob.mantel_r == 0.3095
+    assert res_mob.p_raw == 0.0268
+    assert res_mob.p_adj == 0.1608
