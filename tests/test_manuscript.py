@@ -4,12 +4,16 @@ assert exact field-to-prose traceability."""
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
+import zipfile
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
+from metaomics_scribe.figure_builder import FigureBuilder
 from metaomics_scribe.journal import load_journal
 from metaomics_scribe.manifest import load_manifest
 from metaomics_scribe.manuscript import ManuscriptDrafter
@@ -236,6 +240,47 @@ def test_draft_docx_produces_docx(example_manifest: Path, tmp_path: Path):
     assert drafted.docx_path.suffix == ".docx"
     # DOCX is a zip — check the magic bytes.
     assert drafted.docx_path.read_bytes()[:2] == b"PK"
+
+
+@pytest.mark.skipif(shutil.which("pandoc") is None, reason="pandoc not on PATH")
+def test_draft_docx_embeds_figure_images(
+    example_manifest: Path, tmp_path: Path, monkeypatch
+):
+    """Pandoc must embed the staged panel-composite TIFFs into the DOCX so the
+    figures actually appear in the document. Regression: the CLI ran pandoc
+    from its own CWD (usually the repo root), which never contains the
+    ``figures/`` folder written under ``runs/<study>/``. Pandoc silently
+    dropped every ``![](figures/…)`` image."""
+    # Stamp the panel-composite TIFFs the example manifest declares so
+    # FigureBuilder can copy them into runs/<study>/figures/.
+    data = json.loads(example_manifest.read_text(encoding="utf-8"))
+    for fig in data.get("stages", {}).get("panels", {}).get("figures", []):
+        if fig.get("kind") != "panel_composite":
+            continue
+        target = tmp_path / fig["path"]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (200, 150), (180, 180, 180)).save(target, format="TIFF")
+
+    m = load_manifest(example_manifest)
+    j = load_journal(FRONTIERS_JOURNAL)
+
+    # FigureBuilder stages the composites so pandoc has something to embed.
+    FigureBuilder(m, j, output_root=tmp_path / "runs").build_all()
+
+    # Simulate the real CLI invocation: process CWD is not the manuscript
+    # directory. Without this monkeypatch, the test passes on pandoc's
+    # accidentally-lenient resource resolution behaviour and the bug slips.
+    monkeypatch.chdir(tmp_path)
+
+    drafter = ManuscriptDrafter(m, j, output_root=tmp_path / "runs")
+    drafted = drafter.draft_docx()
+
+    with zipfile.ZipFile(drafted.docx_path) as z:
+        media = [name for name in z.namelist() if name.startswith("word/media/")]
+    assert media, (
+        "pandoc emitted no embedded media — the manuscript.md image links "
+        "did not resolve against the figures directory"
+    )
 
 
 def test_draft_docx_raises_when_pandoc_missing(example_manifest: Path, tmp_path: Path, monkeypatch):

@@ -21,6 +21,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from .figure_builder import FigureBuilder
 from .journal import load_journal
 from .llm import DEFAULT_MODEL, ResultsGuardrailError
 from .manifest import UnsupportedManifestVersion, load_manifest
@@ -117,6 +118,14 @@ def _draft(args: argparse.Namespace) -> int:
 
     journal = load_journal(args.journal)
     methodology = load_methodology(args.methods) if args.methods is not None else None
+
+    # Stage figures and supplementary tables before drafting so the manuscript
+    # run dir mirrors what batch 1 produced manually. FigureBuilder raises on
+    # missing source files — surface that loudly rather than draft prose that
+    # references files the human author can't find.
+    figure_builder = FigureBuilder(manifest, journal, output_root=args.output_root)
+    figure_builder.build_all()
+    figure_builder.build_supplementary_tables()
 
     drafter = ManuscriptDrafter(
         manifest,

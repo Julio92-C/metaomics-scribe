@@ -178,6 +178,77 @@ def _build_user_prompt(subsection: Subsection, composites: list[Figure]) -> str:
     return "\n".join(lines)
 
 
+CAPTION_SYSTEM_INSTRUCTIONS = """\
+You are drafting one figure caption for a Frontiers in Microbiology
+"Original Research" manuscript reporting a metagenomics study. The figure is
+a publication-ready panel composite assembled upstream by the pipeline; the
+GROUNDING PACK below lists every per-stage figure the pipeline emitted, with
+each figure's kind, metric, and caption_seed. The composite for this caption
+was assembled from a subset of those per-stage figures; use the kinds and
+caption_seeds in the same Results subsection to infer the panel contents.
+
+Hard constraints (violations fail the build):
+
+1. **No invented numbers.** Every numeric value in the caption MUST appear
+   verbatim in the GROUNDING PACK below. Omit any claim you can't ground.
+2. **No figure label prefix.** Return only the caption body; the drafter
+   prepends the slot id label.
+3. **Scientific past tense.** 50-120 words. One paragraph.
+4. **Describe what the composite shows, panel by panel where appropriate.**
+   Treat per-stage figures whose subsection matches the composite's
+   subsection as the most likely panels.
+5. **Cite statistics from the parsed statistics block only.** Quote p-values
+   and effect sizes with the same precision the grounding pack uses.
+"""
+
+
+def draft_figure_caption(
+    caller: LLMCaller,
+    *,
+    manifest: Manifest,
+    stats_bundle: StatsBundle,
+    composite: Figure,
+    model: str = DEFAULT_MODEL,
+) -> str:
+    """Draft one figure caption and validate it against the grounding pack.
+
+    Routed only for panel composites — the per-stage figures keep the pipeline's
+    own caption_seed. The numeric-traceability guardrail is the same one used
+    for Results prose so a fabricated number can never reach disk.
+    """
+    grounding = build_grounding_pack(manifest, stats_bundle)
+    system_text = (
+        f"{CAPTION_SYSTEM_INSTRUCTIONS}\n\n## GROUNDING PACK\n\n```json\n{grounding}\n```\n"
+    )
+    user_text = _build_caption_user_prompt(composite)
+
+    caption = caller(system_text, user_text, model).strip()
+    # Reuse the same guardrail as Results prose. The subsection id is used
+    # only to surface a clear error message; pass the composite slot as a
+    # stand-in when the composite isn't tagged with a subsection.
+    validate_no_invented_numbers(
+        caption, grounding, composite.subsection or (composite.slot or "<unknown>")
+    )
+    return caption
+
+
+def _build_caption_user_prompt(composite: Figure) -> str:
+    """Per-composite user-turn payload."""
+    slot = composite.slot or "(unknown slot)"
+    subsection = composite.subsection or "(no subsection)"
+    seed = (composite.caption_seed or "").strip() or "(no caption seed)"
+    lines = [
+        f"Draft a caption for the panel composite at slot `{slot}`.",
+        "",
+        f"Results subsection: `{subsection}`.",
+        f"Pipeline-emitted seed (often a placeholder): {seed}",
+        "",
+        "Use the GROUNDING PACK in the system block to describe the panels.",
+        "Return only the caption body - no slot label, no preamble.",
+    ]
+    return "\n".join(lines)
+
+
 def draft_results_section(
     caller: LLMCaller,
     *,

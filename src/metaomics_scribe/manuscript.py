@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from .llm import (
     DEFAULT_MODEL,
     LLMCaller,
     default_caller,
+    draft_figure_caption,
     draft_results_section,
 )
 from .manifest import Figure, Manifest
@@ -56,11 +58,12 @@ class ManuscriptDrafter:
         self.journal = journal
         self.output_root = Path(output_root)
         self.methodology = methodology
-        # When non-None, results subsections render LLM-generated prose for
-        # this run instead of the v0.4.0 stub. Set transiently by
-        # draft_with_llm() so the dispatcher in _render_results_stub can
-        # reach it; not part of the public surface.
+        # Populated by draft_with_llm(): subsection_id -> Results prose,
+        # composite_slot_id -> figure caption. Persisted across subsequent
+        # draft() calls so the docx re-render keeps every LLM-generated
+        # output. Not part of the public API.
         self._llm_prose: dict[str, str] | None = None
+        self._llm_captions: dict[str, str] | None = None
 
     def _manuscript_dir(self) -> Path:
         return self.output_root / self.manifest.study.id
@@ -107,31 +110,97 @@ class ManuscriptDrafter:
         if caller is None:
             caller = default_caller()
 
+        stats_bundle = extract_stats(self.manifest)
+
         results_section = self._find_results_section()
         prose: dict[str, str] = {}
+        prose_failures: list[tuple[str, str]] = []
         if results_section is not None and results_section.subsections:
-            stats_bundle = extract_stats(self.manifest)
             grouped = self._composites_by_subsection()
-            for sub in results_section.subsections:
-                composites = grouped.get(sub.id, [])
-                if not composites:
-                    # Nothing to write about — leave the v0.4.0 "no composite"
-                    # stub in place so the human author sees the gap.
-                    continue
-                prose[sub.id] = draft_results_section(
+            subs_with_composites = [
+                sub for sub in results_section.subsections
+                if grouped.get(sub.id)
+            ]
+            for i, sub in enumerate(subs_with_composites, start=1):
+                composites = grouped[sub.id]
+                print(
+                    f"[metaomics-scribe] prose {i}/{len(subs_with_composites)}: {sub.id}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                try:
+                    prose[sub.id] = draft_results_section(
+                        caller,
+                        manifest=self.manifest,
+                        stats_bundle=stats_bundle,
+                        subsection=sub,
+                        composites=composites,
+                        model=model,
+                    )
+                except Exception as exc:  # noqa: BLE001 — SDK failure surface is broad
+                    prose_failures.append((sub.id, str(exc)))
+                    print(
+                        f"[metaomics-scribe] prose {sub.id} failed ({exc}); "
+                        f"falling back to TODO stub",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+        if prose_failures:
+            print(
+                f"[metaomics-scribe] {len(prose_failures)} Results subsection(s) "
+                f"fell back to TODO stub: "
+                f"{', '.join(sub for sub, _ in prose_failures)}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        # Caption every panel composite. Per-call failures are tolerated so
+        # one flaky SDK response doesn't discard the whole batch — the slot
+        # falls back to the manifest's caption_seed (surfaced via
+        # _render_figure_block) and a warning is printed. Prose failures are
+        # tolerated the same way above via the deterministic stub.
+        captions: dict[str, str] = {}
+        caption_failures: list[tuple[str, str]] = []
+        composites = [c for c in self._panel_composites() if c.slot]
+        for i, composite in enumerate(composites, start=1):
+            slot = composite.slot  # non-None by filter above
+            print(
+                f"[metaomics-scribe] caption {i}/{len(composites)}: {slot}",
+                file=sys.stderr,
+                flush=True,
+            )
+            try:
+                captions[slot] = draft_figure_caption(
                     caller,
                     manifest=self.manifest,
                     stats_bundle=stats_bundle,
-                    subsection=sub,
-                    composites=composites,
+                    composite=composite,
                     model=model,
                 )
+            except Exception as exc:  # noqa: BLE001 — SDK failure surface is broad
+                caption_failures.append((slot, str(exc)))
+                print(
+                    f"[metaomics-scribe] caption {slot} failed ({exc}); "
+                    f"falling back to caption_seed",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        if caption_failures:
+            print(
+                f"[metaomics-scribe] {len(caption_failures)}/{len(composites)} "
+                f"captions fell back to caption_seed: "
+                f"{', '.join(slot for slot, _ in caption_failures)}",
+                file=sys.stderr,
+                flush=True,
+            )
 
+        # Set both persistently so subsequent self.draft() calls (notably
+        # draft_docx(), which re-renders for pandoc) preserve every LLM
+        # output. Clearing here would silently revert any downstream render
+        # to the deterministic stub.
         self._llm_prose = prose
-        try:
-            return self.draft()
-        finally:
-            self._llm_prose = None
+        self._llm_captions = captions
+        return self.draft()
 
     def draft_docx(self, reference_doc: Path | None = None) -> DraftedManuscript:
         """Render the draft and convert it to DOCX via pandoc.
@@ -148,10 +217,22 @@ class ManuscriptDrafter:
             )
 
         docx_path = drafted.markdown_path.with_suffix(".docx")
-        cmd = ["pandoc", str(drafted.markdown_path), "-o", str(docx_path)]
+        # Run pandoc with cwd = markdown_path.parent so relative image links
+        # in the markdown (e.g. `figures/fig01.tiff`, written by FigureBuilder
+        # into runs/<study>/figures/) resolve regardless of the caller's CWD.
+        # Without this, invoking `metaomics-scribe` from the repo root makes
+        # pandoc look for `figures/…` under the repo root, silently drop every
+        # image, and produce a text-only DOCX.
+        cmd = ["pandoc", drafted.markdown_path.name, "-o", docx_path.name]
         if reference_doc is not None:
             cmd += [f"--reference-doc={reference_doc}"]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        result = subprocess.run(
+            cmd,
+            cwd=drafted.markdown_path.parent,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         if result.returncode != 0:
             raise RuntimeError(
                 f"pandoc failed (exit {result.returncode}):\n"
@@ -192,8 +273,9 @@ class ManuscriptDrafter:
         return "\n".join(lines) + "\n"
 
     def _render_results_stub(self, section: Section) -> str:
-        """Results stub that already references the routed composites under each
-        subsection so the human author sees the figure placement up front."""
+        """Results stub that lists each subsection's composites, drops in the
+        LLM (or stub) prose, then embeds every composite as an inline image +
+        caption so the rendered DOCX is previewable end-to-end."""
         heading = self._human_heading(section.id)
         lines = [f"## {heading}", ""]
         if not section.subsections:
@@ -201,18 +283,19 @@ class ManuscriptDrafter:
             return "\n".join(lines) + "\n"
 
         # Group every panel composite by subsection (or None when absent).
-        groups: dict[str | None, list[str]] = {}
+        groups: dict[str | None, list[Figure]] = {}
         for fig in self._panel_composites():
-            groups.setdefault(fig.subsection, []).append(fig.slot or "(no slot)")
+            groups.setdefault(fig.subsection, []).append(fig)
 
         for sub in section.subsections:
             sub_heading = sub.title or self._human_heading(sub.id)
             lines += [f"### {sub_heading}", ""]
-            slots = groups.get(sub.id, [])
-            if slots:
-                lines.append(
-                    "Figures in this subsection: " + ", ".join(f"`{s}`" for s in slots) + "."
+            figs = groups.get(sub.id, [])
+            if figs:
+                slot_labels = ", ".join(
+                    f"`{f.slot or '(no slot)'}`" for f in figs
                 )
+                lines.append(f"Figures in this subsection: {slot_labels}.")
             else:
                 lines.append(
                     f"> TODO: no `panel_composite` carries `subsection: {sub.id}` in the manifest."
@@ -224,6 +307,8 @@ class ManuscriptDrafter:
             else:
                 lines.append(f"> TODO: prose for {sub.id} not yet drafted by v0.4.0.")
             lines.append("")
+            for fig in figs:
+                lines.extend(self._render_figure_block(fig))
 
         unassigned = groups.get(None, [])
         if unassigned:
@@ -234,10 +319,31 @@ class ManuscriptDrafter:
                 "composites — the human author must place them into a results "
                 "subsection above:",
                 "",
-                *[f"- `{s}`" for s in unassigned],
-                "",
             ]
+            for fig in unassigned:
+                lines.extend(self._render_figure_block(fig))
         return "\n".join(lines) + "\n"
+
+    def _render_figure_block(self, fig: Figure) -> list[str]:
+        """Inline image + caption for one panel composite.
+
+        Caption resolution: LLM-generated caption if available, else the
+        manifest's caption_seed (often a placeholder for composites — the
+        human author can rewrite), else "(no caption)".
+        """
+        slot = fig.slot or "(no slot)"
+        rel_path = f"figures/{slot}.{_composite_extension(fig)}"
+        caption = (
+            (self._llm_captions or {}).get(slot)
+            or (fig.caption_seed or "").strip()
+            or "(no caption)"
+        )
+        return [
+            f"![]({rel_path})",
+            "",
+            f"**Figure `{slot}`.** {caption}",
+            "",
+        ]
 
     def _render_methods(self, section: Section) -> str:
         """Deterministic methods section. Every number / parameter is drawn
@@ -378,6 +484,18 @@ class ManuscriptDrafter:
     @staticmethod
     def _human_heading(slug: str) -> str:
         return slug.replace("_", " ").title()
+
+
+def _composite_extension(fig: Figure) -> str:
+    """Pick the file extension for a panel composite the same way FigureBuilder
+    does (path suffix wins, format is the fallback). Keeps the drafter's
+    embedded image paths in lockstep with the files FigureBuilder writes."""
+    suffix = Path(fig.path).suffix.lstrip(".").lower() if fig.path else ""
+    if suffix:
+        return suffix
+    if fig.format:
+        return fig.format.lower()
+    return "tiff"
 
 
 def _join(items: list[str]) -> str:

@@ -17,6 +17,7 @@ import pytest
 from metaomics_scribe.journal import load_journal
 from metaomics_scribe.llm import (
     ResultsGuardrailError,
+    draft_figure_caption,
     draft_results_section,
     validate_no_invented_numbers,
 )
@@ -148,6 +149,55 @@ def test_draft_results_section_raises_on_fabricated_number():
 
 
 # ---------------------------------------------------------------------------
+# draft_figure_caption — per-composite caller
+# ---------------------------------------------------------------------------
+
+
+def test_draft_figure_caption_passes_grounding_and_slot_to_caller():
+    m = load_manifest(EXAMPLE_MANIFEST)
+    composite = next(
+        f for f in m.stages["panels"].figures
+        if f.kind == "panel_composite" and f.slot == "fig01_taxa_overview"
+    )
+
+    caption = (
+        "The composite integrates alpha-diversity violins, beta-diversity ordination, "
+        "and stacked-bar composition across the 4 Treatment x Time groups."
+    )
+    caller = _RecordingCaller([caption])
+    out = draft_figure_caption(
+        caller,
+        manifest=m,
+        stats_bundle=StatsBundle(),
+        composite=composite,
+    )
+    assert out == caption
+
+    system, user, model = caller.calls[0]
+    assert model == "claude-opus-4-7"
+    assert "GROUNDING PACK" in system
+    # The per-call user prompt names the composite by slot id and subsection.
+    assert "fig01_taxa_overview" in user
+    assert "community_overview" in user
+
+
+def test_draft_figure_caption_raises_on_fabricated_number():
+    m = load_manifest(EXAMPLE_MANIFEST)
+    composite = next(
+        f for f in m.stages["panels"].figures
+        if f.kind == "panel_composite" and f.slot == "fig01_taxa_overview"
+    )
+    bad = "Alpha diversity rose across 12345 reads in the composite."
+    with pytest.raises(ResultsGuardrailError):
+        draft_figure_caption(
+            _RecordingCaller([bad]),
+            manifest=m,
+            stats_bundle=StatsBundle(),
+            composite=composite,
+        )
+
+
+# ---------------------------------------------------------------------------
 # ManuscriptDrafter.draft_with_llm — end-to-end with caller lambda
 # ---------------------------------------------------------------------------
 
@@ -155,43 +205,108 @@ def test_draft_results_section_raises_on_fabricated_number():
 def test_draft_with_llm_renders_prose_per_subsection(
     example_manifest: Path, tmp_path: Path
 ):
+    """`draft_with_llm` calls the caller once per subsection with composites
+    AND once per composite (for the figure caption)."""
     m = load_manifest(example_manifest)
     j = load_journal(FRONTIERS_JOURNAL)
     drafter = ManuscriptDrafter(m, j, output_root=tmp_path / "runs")
 
-    # In the example manifest only `community_overview` has composites; one
-    # caller invocation should be made. Use a prose string with only
-    # manifest-grounded numbers so the guardrail passes.
-    prose = (
+    # Reusing a single grounded response keeps the guardrail happy across
+    # both the prose call and every per-composite caption call.
+    response = (
         "Alpha diversity in `fig01_taxa_overview` and composition in "
         "`fig05_relative_abundance_species` were assessed across 32 samples."
     )
-    caller = _RecordingCaller([prose])
+    caller = _RecordingCaller([response])
     drafted = drafter.draft_with_llm(caller)
 
     text = drafted.markdown_path.read_text(encoding="utf-8")
-    assert prose in text
+    assert response in text
     # Subsections without composites still show the v0.4.0 stub.
     assert "no `panel_composite` carries `subsection: resistome`" in text
-    assert len(caller.calls) == 1
+
+    # Example manifest panel composites: fig01, fig05 (community_overview) +
+    # figS00 (no subsection). One prose call for community_overview, plus
+    # three caption calls — one per composite.
+    composite_slots = {f.slot for f in m.stages["panels"].figures if f.kind == "panel_composite"}
+    assert len(composite_slots) == 3
+    assert len(caller.calls) == 1 + len(composite_slots)
 
 
-def test_draft_with_llm_clears_internal_state_after_run(
+def test_draft_with_llm_embeds_figures_with_captions(
     example_manifest: Path, tmp_path: Path
 ):
-    """Subsequent draft() calls must not leak LLM prose from a prior LLM run."""
+    """Every panel composite gets an inline image embed plus an LLM caption."""
     m = load_manifest(example_manifest)
     j = load_journal(FRONTIERS_JOURNAL)
     drafter = ManuscriptDrafter(m, j, output_root=tmp_path / "runs")
-    caller = _RecordingCaller([
-        "Community-level diversity is shown in `fig01_taxa_overview` (32 samples)."
-    ])
-    drafter.draft_with_llm(caller)
-    assert drafter._llm_prose is None
 
-    # A plain draft() now produces the v0.4.0 TODO stub again.
-    plain = drafter.draft().markdown_path.read_text(encoding="utf-8")
-    assert "TODO: prose for community_overview not yet drafted" in plain
+    caption = (
+        "Stacked-bar composition of the top taxa per sample across 32 samples."
+    )
+    caller = _RecordingCaller([caption])
+    drafted = drafter.draft_with_llm(caller)
+
+    text = drafted.markdown_path.read_text(encoding="utf-8")
+    # Image embed uses a relative path so pandoc resolves to runs/<study>/figures.
+    assert "![](figures/fig01_taxa_overview.tiff)" in text
+    assert "![](figures/fig05_relative_abundance_species.tiff)" in text
+    # Each composite has its slot id labelled and the LLM caption underneath.
+    assert "**Figure `fig01_taxa_overview`.**" in text
+    assert caption in text
+    # Captions land in the drafter state so subsequent renders preserve them.
+    assert drafter._llm_captions is not None
+    assert set(drafter._llm_captions.keys()) >= {
+        "fig01_taxa_overview",
+        "fig05_relative_abundance_species",
+        "figS00_heatmap_species",
+    }
+
+
+def test_draft_without_llm_embeds_figures_with_caption_seed(
+    example_manifest: Path, tmp_path: Path
+):
+    """Deterministic draft() still embeds figures, using the manifest's
+    caption_seed as the caption — so a no-LLM run produces a previewable
+    docx even when caption_seed is a placeholder."""
+    m = load_manifest(example_manifest)
+    j = load_journal(FRONTIERS_JOURNAL)
+    drafter = ManuscriptDrafter(m, j, output_root=tmp_path / "runs")
+
+    text = drafter.draft().markdown_path.read_text(encoding="utf-8")
+    assert "![](figures/fig01_taxa_overview.tiff)" in text
+    assert "**Figure `fig01_taxa_overview`.**" in text
+    # caption_seed for fig01 in the example manifest:
+    assert "Taxonomic overview" in text
+
+
+def test_draft_with_llm_retains_prose_and_captions_for_subsequent_renders(
+    example_manifest: Path, tmp_path: Path
+):
+    """After draft_with_llm(), subsequent draft() calls reuse both the LLM
+    Results prose AND every LLM figure caption.
+
+    This is what keeps the `--llm --docx` CLI path honest: ``draft_docx()``
+    internally calls ``self.draft()`` to regenerate the markdown for pandoc,
+    and that second render must preserve every LLM-generated output — not
+    silently revert to the deterministic stub.
+    """
+    response = "Community-level diversity is shown in `fig01_taxa_overview` (32 samples)."
+    m = load_manifest(example_manifest)
+    j = load_journal(FRONTIERS_JOURNAL)
+    drafter = ManuscriptDrafter(m, j, output_root=tmp_path / "runs")
+    caller = _RecordingCaller([response])
+
+    drafter.draft_with_llm(caller)
+    assert drafter._llm_prose == {"community_overview": response}
+    assert drafter._llm_captions is not None
+    assert "fig01_taxa_overview" in drafter._llm_captions
+
+    second = drafter.draft().markdown_path.read_text(encoding="utf-8")
+    assert response in second
+    assert "TODO: prose for community_overview" not in second
+    # The captions persist into the re-render too.
+    assert "![](figures/fig01_taxa_overview.tiff)" in second
 
 
 # ---------------------------------------------------------------------------
