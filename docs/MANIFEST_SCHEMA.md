@@ -13,7 +13,7 @@ The single contract between the upstream metagenomics pipeline and `metaomics-sc
 
 ```jsonc
 {
-  "manifest_version": "1.2",
+  "manifest_version": "1.3",
   "study": { ... },        // describes the experiment
   "config": { ... },       // pipeline configuration snapshot (filters, stats params)
   "outputs": { ... },      // base directories (paths in stages are relative to these)
@@ -257,6 +257,11 @@ Stable strings the agent uses to route artifacts to manuscript sections. Add new
 | `ge_tpm_totals` | resistome / virulome / mobilome | Results: domain abundance |
 | `network_nodes` / `network_edges` | network | Methods + supplementary |
 | `network_topology` | network | Results: network topology |
+| `shared_fraction_species` *(1.3)* | shared_fraction | Results: species shared between groups (prevalence, abundance, membership pattern, tier) |
+| `shared_fraction_pairwise` *(1.3)* | shared_fraction | Results / supplementary: species shared by each pair of groups |
+| `shared_fraction_elements` *(1.3)* | shared_fraction | Results: ARG/VF/MGE genes on reads of the widespread shared species |
+| `shared_fraction_linkage_edges` *(1.3)* | shared_fraction | Results: levels of a metadata variable linked by widespread shared species |
+| `taxa_tree_nodes` *(1.3)* | taxa_tree | Supplementary: species on the taxonomic tree with lineage and annotations |
 
 ### Figures
 
@@ -281,6 +286,11 @@ Stable strings the agent uses to route artifacts to manuscript sections. Add new
 | `connectivity_venn_taxa` / `connectivity_venn_genesets` *(1.1)* | network |
 | `network_graph` / `chord` / `sankey` / `degree_distribution` | network |
 | `sankey_png` *(1.1)* | network (PNG render of the HTML sankey, for journal figure use) |
+| `shared_fraction_prevalence_abundance` *(1.3)* | shared_fraction |
+| `shared_fraction_pairwise` / `shared_fraction_upset` / `shared_fraction_tiers` *(1.3)* | shared_fraction |
+| `shared_fraction_widespread` / `shared_fraction_heatmap` *(1.3)* | shared_fraction |
+| `shared_fraction_linkage` *(1.3)* | shared_fraction (one figure per metadata variable in `shared_fraction.linkage_vars`) |
+| `taxa_tree` *(1.3)* | taxa_tree — circular taxonomic tree (NCBI lineage, not evolutionary distance) |
 | `panel_composite` *(1.2)* | the `panels` stage — pre-stitched manuscript composite; pairs with `slot` + `section` fields on Figure |
 
 ### Stats text
@@ -300,7 +310,19 @@ Stable strings the agent uses to route artifacts to manuscript sections. Add new
 
 ### Changelog
 
-- **1.2** *(current — emitted by pipeline as of 2026-06)*
+- **1.3** *(current — emitted by meridian from the `feat/taxa-shared-fraction` branch, 2026-10)*
+  - Added two stages, `shared_fraction` and `taxa_tree`, with the *(1.3)* table
+    and figure kinds above. `shared_fraction` describes the species shared
+    between groups for any number of groups: membership pattern, prevalence
+    tiers (widespread / recurrent / sporadic), the genes on widespread species'
+    reads, and linkage between the levels of metadata variables.
+    `taxa_tree` is a lineage-based cladogram, not a phylogeny; captions must
+    not describe branch lengths as evolutionary distance.
+  - `shared_fraction_pairwise` is used for both a table and a figure; the
+    agent distinguishes them by the `tables` vs `figures` list.
+  - Pure additive on top of 1.2 — no field renames or removals. Agents that
+    do not route these kinds skip them.
+- **1.2** *(emitted by pipeline as of 2026-06)*
   - Added the `panels` stage convention (see "The `panels` stage" section
     above). The pipeline now ships pre-stitched multi-panel manuscript
     composites under `Figures/panels/{main,supplementary}/` and surfaces them
