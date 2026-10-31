@@ -262,6 +262,7 @@ Stable strings the agent uses to route artifacts to manuscript sections. Add new
 | `shared_fraction_elements` *(1.3)* | shared_fraction | Results: ARG/VF/MGE genes on reads of the widespread shared species |
 | `shared_fraction_linkage_edges` *(1.3)* | shared_fraction | Results: levels of a metadata variable linked by widespread shared species |
 | `taxa_tree_nodes` *(1.3)* | taxa_tree | Supplementary: species on the taxonomic tree with lineage and annotations |
+| `daa_tree_nodes` *(1.3)* | daa_tree | Supplementary: top differentially abundant taxa per group pair with lineage, effect, enriched group and adjusted p |
 
 ### Figures
 
@@ -291,6 +292,7 @@ Stable strings the agent uses to route artifacts to manuscript sections. Add new
 | `shared_fraction_widespread` / `shared_fraction_heatmap` *(1.3)* | shared_fraction |
 | `shared_fraction_linkage` *(1.3)* | shared_fraction (one figure per metadata variable in `shared_fraction.linkage_vars`) |
 | `taxa_tree` *(1.3)* | taxa_tree — circular taxonomic tree (NCBI lineage, not evolutionary distance) |
+| `daa_tree` *(1.3)* | daa_tree — the same tree for the top ALDEx2 taxa of one group pair (`pair` field) |
 | `panel_composite` *(1.2)* | the `panels` stage — pre-stitched manuscript composite; pairs with `slot` + `section` fields on Figure |
 
 ### Stats text
@@ -311,7 +313,7 @@ Stable strings the agent uses to route artifacts to manuscript sections. Add new
 ### Changelog
 
 - **1.3** *(current — emitted by meridian from the `feat/taxa-shared-fraction` branch, 2026-10)*
-  - Added two stages, `shared_fraction` and `taxa_tree`, with the *(1.3)* table
+  - Added three stages, `shared_fraction`, `taxa_tree` and `daa_tree`, with the *(1.3)* table
     and figure kinds above. `shared_fraction` describes the species shared
     between groups for any number of groups: membership pattern, prevalence
     tiers (widespread / recurrent / sporadic), the genes on widespread species'
